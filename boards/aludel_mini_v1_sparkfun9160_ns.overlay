@@ -1,0 +1,4 @@
+&uart2 {
+	status = "okay";
+	current-speed = <38400>;
+};
