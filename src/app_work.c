@@ -13,6 +13,7 @@ LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
 
 #include "app_work.h"
 #include "libostentus/libostentus.h"
+#include "minmea/minmea.h"
 
 static struct golioth_client *client;
 /* Add Sensor structs here */

@@ -1,0 +1,3 @@
+[submodule "src/minmea"]
+	path = src/minmea
+	url = git@github.com:kosma/minmea.git
