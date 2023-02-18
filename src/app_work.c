@@ -55,7 +55,11 @@ void serial_cb(const struct device *dev, void *user_data) {
 			}
 
 			/* if queue is full, message is silently dropped */
-			k_msgq_put(&nmea_msgq, &rx_buf, K_NO_WAIT);
+			enum minmea_sentence_id sid;
+			sid = minmea_sentence_id(rx_buf, false);
+			if (sid == MINMEA_SENTENCE_RMC) {
+				k_msgq_put(&nmea_msgq, &rx_buf, K_NO_WAIT);
+			}
 
 			/* reset the buffer (it was copied to the msgq) */
 			rx_buf_pos = 0;
@@ -78,10 +82,40 @@ static int async_error_handler(struct golioth_req_rsp *rsp) {
 /* This will be called by the main() loop */
 /* Do all of your work here! */
 void app_work_sensor_read(void) {
+	int err;
 	char received_nmea[NMEA_SIZE];
+	static struct minmea_sentence_rmc frame;
+	char json_buf[128];
 
 	while (k_msgq_get(&nmea_msgq, &received_nmea, K_NO_WAIT) == 0) {
-		LOG_INF("%s", received_nmea);
+		bool success = minmea_parse_rmc(&frame, received_nmea);
+		if (success) {
+			
+			float lat = minmea_tocoord(&frame.latitude);
+			float lon = minmea_tocoord(&frame.longitude);
+			if ((lat == NAN) || (lon == NAN)) {
+				LOG_DBG("Skipping because lat or lon is NAN");
+				continue;
+			}
+			snprintf(json_buf, sizeof(json_buf),
+					"{\"lat\":%f,\"lon\":%f,\"alt\":0,\"time\":\"%02d-%02d-%02dT%02d:%02d:%02d.%03dZ\"}",
+					lat,
+					lon,
+					frame.date.year,
+					frame.date.month,
+					frame.date.day,
+					frame.time.hours,
+					frame.time.minutes,
+					frame.time.seconds,
+					frame.time.microseconds
+					);
+			LOG_INF("%s", json_buf);
+			err = golioth_stream_push_cb(client, "gps",
+					GOLIOTH_CONTENT_FORMAT_APP_JSON,
+					json_buf, strlen(json_buf),
+					async_error_handler, NULL);
+			if (err) LOG_ERR("Failed to send sensor data to Golioth: %d", err);	
+		}
 	}
 }
 
