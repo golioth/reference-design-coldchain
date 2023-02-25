@@ -15,7 +15,8 @@ LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
 
 #include "app_work.h"
 #include "libostentus/libostentus.h"
-#include "minmea/minmea.h"
+#include "lib/minmea/minmea.h"
+#include <stdio.h>
 
 #define UART_DEVICE_NODE DT_ALIAS(click_uart)
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
