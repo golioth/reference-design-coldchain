@@ -86,7 +86,9 @@ void app_work_sensor_read(void) {
 	char received_nmea[NMEA_SIZE];
 	static struct minmea_sentence_rmc frame;
 	char json_buf[128];
-	char ts[32];
+	char ts_str[32];
+	char lat_str[12];
+	char lon_str[12];
 
 	while (k_msgq_get(&nmea_msgq, &received_nmea, K_NO_WAIT) == 0) {
 		bool success = minmea_parse_rmc(&frame, received_nmea);
@@ -97,9 +99,9 @@ void app_work_sensor_read(void) {
 				continue;
 			}
 
-			float lat = minmea_tocoord(&frame.latitude);
-			float lon = minmea_tocoord(&frame.longitude);
-			snprintf(ts, sizeof(ts), "20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+			snprintf(lat_str, sizeof(lat_str), "%f", minmea_tocoord(&frame.latitude));
+			snprintf(lon_str, sizeof(lon_str), "%f", minmea_tocoord(&frame.longitude));
+			snprintf(ts_str, sizeof(ts_str), "20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ",
 					frame.date.year,
 					frame.date.month,
 					frame.date.day,
@@ -108,14 +110,15 @@ void app_work_sensor_read(void) {
 					frame.time.seconds,
 					frame.time.microseconds
 					);
-			snprintf(json_buf, sizeof(json_buf),
-					"{\"lat\":%f,\"lon\":%f,\"alt\":0,\"time\":\"%s\",\"dbg\":\"%s\"}",
-					lat,
-					lon,
-					ts,
-					ts
+
+			snprintk(json_buf, sizeof(json_buf),
+					"{\"lat\":%s,\"lon\":%s,\"alt\":0,\"time\":\"%s\"}",
+					lat_str,
+					lon_str,
+					ts_str
 					);
 			LOG_DBG("%s", json_buf);
+
 			err = golioth_stream_push(client, "gps",
 					GOLIOTH_CONTENT_FORMAT_APP_JSON,
 					json_buf, strlen(json_buf));
