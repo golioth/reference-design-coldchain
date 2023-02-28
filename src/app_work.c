@@ -22,7 +22,7 @@ LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
 #define NMEA_SIZE 128
-K_MSGQ_DEFINE(nmea_msgq, NMEA_SIZE, 16, 4);
+K_MSGQ_DEFINE(nmea_msgq, NMEA_SIZE, 64, 4);
 
 static char rx_buf[NMEA_SIZE];
 static int rx_buf_pos;
@@ -86,6 +86,7 @@ void app_work_sensor_read(void) {
 	char received_nmea[NMEA_SIZE];
 	static struct minmea_sentence_rmc frame;
 	char json_buf[128];
+	char ts[32];
 
 	while (k_msgq_get(&nmea_msgq, &received_nmea, K_NO_WAIT) == 0) {
 		bool success = minmea_parse_rmc(&frame, received_nmea);
@@ -98,10 +99,7 @@ void app_work_sensor_read(void) {
 
 			float lat = minmea_tocoord(&frame.latitude);
 			float lon = minmea_tocoord(&frame.longitude);
-			snprintf(json_buf, sizeof(json_buf),
-					"{\"lat\":%f,\"lon\":%f,\"alt\":0,\"time\":\"%02d-%02d-%02dT%02d:%02d:%02d.%03dZ\"}",
-					lat,
-					lon,
+			snprintf(ts, sizeof(ts), "20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ",
 					frame.date.year,
 					frame.date.month,
 					frame.date.day,
@@ -110,11 +108,17 @@ void app_work_sensor_read(void) {
 					frame.time.seconds,
 					frame.time.microseconds
 					);
+			snprintf(json_buf, sizeof(json_buf),
+					"{\"lat\":%f,\"lon\":%f,\"alt\":0,\"time\":\"%s\",\"dbg\":\"%s\"}",
+					lat,
+					lon,
+					ts,
+					ts
+					);
 			LOG_DBG("%s", json_buf);
-			err = golioth_stream_push_cb(client, "gps",
+			err = golioth_stream_push(client, "gps",
 					GOLIOTH_CONTENT_FORMAT_APP_JSON,
-					json_buf, strlen(json_buf),
-					async_error_handler, NULL);
+					json_buf, strlen(json_buf));
 			if (err) LOG_ERR("Failed to send sensor data to Golioth: %d", err);	
 		}
 	}
