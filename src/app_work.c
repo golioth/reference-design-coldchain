@@ -91,12 +91,13 @@ void app_work_sensor_read(void) {
 		bool success = minmea_parse_rmc(&frame, received_nmea);
 		if (success) {
 			
-			float lat = minmea_tocoord(&frame.latitude);
-			float lon = minmea_tocoord(&frame.longitude);
-			if ((lat == NAN) || (lon == NAN)) {
-				LOG_DBG("Skipping because lat or lon is NAN");
+			if (!frame.valid) {
+				LOG_DBG("Skipping because satellite fix not established");
 				continue;
 			}
+
+			float lat = minmea_tocoord(&frame.latitude);
+			float lon = minmea_tocoord(&frame.longitude);
 			snprintf(json_buf, sizeof(json_buf),
 					"{\"lat\":%f,\"lon\":%f,\"alt\":0,\"time\":\"%02d-%02d-%02dT%02d:%02d:%02d.%03dZ\"}",
 					lat,
@@ -109,7 +110,7 @@ void app_work_sensor_read(void) {
 					frame.time.seconds,
 					frame.time.microseconds
 					);
-			LOG_INF("%s", json_buf);
+			LOG_DBG("%s", json_buf);
 			err = golioth_stream_push_cb(client, "gps",
 					GOLIOTH_CONTENT_FORMAT_APP_JSON,
 					json_buf, strlen(json_buf),
