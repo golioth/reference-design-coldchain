@@ -118,6 +118,8 @@ void app_work_sensor_read(void) {
 					ts_str
 					);
 			LOG_DBG("%s", json_buf);
+			slide_set(O_LAT, lat_str, strlen(lat_str));
+			slide_set(O_LON, lon_str, strlen(lon_str));
 
 			err = golioth_stream_push(client, "gps",
 					GOLIOTH_CONTENT_FORMAT_APP_JSON,
