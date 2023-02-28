@@ -10,7 +10,7 @@ LOG_MODULE_REGISTER(app_settings, LOG_LEVEL_DBG);
 #include <net/golioth/settings.h>
 #include "main.h"
 
-static int32_t _loop_delay_s = 60;
+static int32_t _loop_delay_s = 5;
 
 int32_t get_loop_delay_s(void) {
 	return _loop_delay_s;
