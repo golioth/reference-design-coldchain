@@ -22,7 +22,24 @@ LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
 #define NMEA_SIZE 128
-K_MSGQ_DEFINE(nmea_msgq, NMEA_SIZE, 64, 4);
+
+struct cold_chain_data {
+	struct sensor_value tem;
+	struct sensor_value pre;
+	struct sensor_value hum;
+	struct minmea_sentence_rmc frame;
+};
+
+struct weather_data {
+	struct sensor_value tem;
+	struct sensor_value pre;
+	struct sensor_value hum;
+};
+
+/* Global to hold BME280 readings; updated at 1 Hz by thread */
+struct weather_data _latest_weather_data;
+
+K_MSGQ_DEFINE(nmea_msgq, sizeof(struct cold_chain_data), 64, 4);
 
 static char rx_buf[NMEA_SIZE];
 static int rx_buf_pos;
@@ -31,8 +48,36 @@ static struct golioth_client *client;
 /* Add Sensor structs here */
 const struct device *weather_dev;
 
-/* Formatting string for sending sensor JSON to Golioth */
-#define JSON_FMT	"{\"counter\":%d}"
+/* Thread reads weather sensor and provides easy access to latest data */
+K_MUTEX_DEFINE(weather_mutex); /* Protect data */
+K_SEM_DEFINE(bme280_initialized_sem, 0, 1); /* Wait until sensor is ready */
+
+void weather_sensor_data_fetch(void) {
+	sensor_sample_fetch(weather_dev);
+	if (k_mutex_lock(&weather_mutex, K_MSEC(100)) == 0) {
+		sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP, &_latest_weather_data.tem);
+		sensor_channel_get(weather_dev, SENSOR_CHAN_PRESS, &_latest_weather_data.pre);
+		sensor_channel_get(weather_dev, SENSOR_CHAN_HUMIDITY, &_latest_weather_data.hum);
+		k_mutex_unlock(&weather_mutex);
+	} else {
+		LOG_DBG("Unable to lock mutex to read weather sensor");
+	}
+}
+
+#define WEATHER_STACK 1024
+
+extern void weather_sensor_thread(void *d0, void *d1, void *d2) {
+	/* Block until sensor is available */
+	k_sem_take(&bme280_initialized_sem, K_FOREVER);
+	while(1) {
+		weather_sensor_data_fetch();
+		k_sleep(K_SECONDS(1));
+	}
+}
+
+K_THREAD_DEFINE(weather_sensor_tid, WEATHER_STACK,
+            weather_sensor_thread, NULL, NULL, NULL,
+            K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
 /* UART callback */
 void serial_cb(const struct device *dev, void *user_data) {
@@ -59,7 +104,24 @@ void serial_cb(const struct device *dev, void *user_data) {
 			enum minmea_sentence_id sid;
 			sid = minmea_sentence_id(rx_buf, false);
 			if (sid == MINMEA_SENTENCE_RMC) {
-				k_msgq_put(&nmea_msgq, &rx_buf, K_NO_WAIT);
+				struct cold_chain_data cc_data;
+				bool success = minmea_parse_rmc(&cc_data.frame, rx_buf);
+				if (success) {
+
+					if (cc_data.frame.valid == true) {
+						if (k_mutex_lock(&weather_mutex, K_MSEC(1)) == 0) {
+							cc_data.tem = _latest_weather_data.tem;
+							cc_data.pre = _latest_weather_data.pre;
+							cc_data.hum = _latest_weather_data.hum;
+							k_mutex_unlock(&weather_mutex);
+							k_msgq_put(&nmea_msgq, &cc_data, K_NO_WAIT);
+						} else {
+							LOG_ERR("Couldn't read weather info, skipping this reading");
+						}
+					} else {
+						LOG_DBG("Skipping because satellite fix not established");
+					}
+				}
 			}
 
 			/* reset the buffer (it was copied to the msgq) */
@@ -69,15 +131,6 @@ void serial_cb(const struct device *dev, void *user_data) {
 		}
 		/* else: characters beyond buffer size are dropped */
 	}
-}
-
-/* Callback for LightDB Stream */
-static int async_error_handler(struct golioth_req_rsp *rsp) {
-	if (rsp->err) {
-		LOG_ERR("Async task failed: %d", rsp->err);
-		return rsp->err;
-	}
-	return 0;
 }
 
 /*
@@ -102,6 +155,9 @@ static const struct device *get_bme280_device(void)
 	}
 
 	LOG_DBG("Found device \"%s\", getting sensor data", bme_dev->name);
+
+	/* Give semaphore to signal sensor is ready for reading */
+	k_sem_give(&bme280_initialized_sem);
 	return bme_dev;
 }
 
@@ -109,61 +165,46 @@ static const struct device *get_bme280_device(void)
 /* Do all of your work here! */
 void app_work_sensor_read(void) {
 	int err;
-	struct sensor_value tem, pre, hum;
-	char received_nmea[NMEA_SIZE];
-	static struct minmea_sentence_rmc frame;
+	struct cold_chain_data cached_data;
 	char json_buf[128];
 	char ts_str[32];
 	char lat_str[12];
 	char lon_str[12];
+	char tem_str[12];
 
-	sensor_sample_fetch(weather_dev);
-	sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP, &tem);
-	sensor_channel_get(weather_dev, SENSOR_CHAN_PRESS, &pre);
-	sensor_channel_get(weather_dev, SENSOR_CHAN_HUMIDITY, &hum);
+	while (k_msgq_get(&nmea_msgq, &cached_data, K_NO_WAIT) == 0) {
 
-	LOG_INF("Temperature: %d.%06d Pressure: %d.%06d Humidity: %d.%06d",
-			tem.val1, tem.val2,
-			pre.val1, pre.val2,
-			hum.val1, hum.val2
-			);
+		snprintf(lat_str, sizeof(lat_str), "%f", minmea_tocoord(&cached_data.frame.latitude));
+		snprintf(lon_str, sizeof(lon_str), "%f", minmea_tocoord(&cached_data.frame.longitude));
+		snprintf(ts_str, sizeof(ts_str), "20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+				cached_data.frame.date.year,
+				cached_data.frame.date.month,
+				cached_data.frame.date.day,
+				cached_data.frame.time.hours,
+				cached_data.frame.time.minutes,
+				cached_data.frame.time.seconds,
+				cached_data.frame.time.microseconds
+				);
+		snprintk(tem_str, sizeof(tem_str), "%d.%02dc", cached_data.tem.val1, cached_data.tem.val2 / 10000);
 
-	while (k_msgq_get(&nmea_msgq, &received_nmea, K_NO_WAIT) == 0) {
-		bool success = minmea_parse_rmc(&frame, received_nmea);
-		if (success) {
-			
-			if (!frame.valid) {
-				LOG_DBG("Skipping because satellite fix not established");
-				continue;
-			}
+		snprintk(json_buf, sizeof(json_buf),
+				"{\"lat\":%s,\"lon\":%s,\"time\":\"%s\",\"tem\":%d.%06d,\"pre\":%d.%06d,\"hum\":%d.%06d}",
+				lat_str,
+				lon_str,
+				ts_str,
+				cached_data.tem.val1, cached_data.tem.val2,
+				cached_data.pre.val1, cached_data.pre.val2,
+				cached_data.hum.val1, cached_data.hum.val2
+				);
+		LOG_DBG("%s", json_buf);
+		slide_set(O_LAT, lat_str, strlen(lat_str));
+		slide_set(O_LON, lon_str, strlen(lon_str));
+		slide_set(O_TEM, tem_str, strlen(tem_str));
 
-			snprintf(lat_str, sizeof(lat_str), "%f", minmea_tocoord(&frame.latitude));
-			snprintf(lon_str, sizeof(lon_str), "%f", minmea_tocoord(&frame.longitude));
-			snprintf(ts_str, sizeof(ts_str), "20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-					frame.date.year,
-					frame.date.month,
-					frame.date.day,
-					frame.time.hours,
-					frame.time.minutes,
-					frame.time.seconds,
-					frame.time.microseconds
-					);
-
-			snprintk(json_buf, sizeof(json_buf),
-					"{\"lat\":%s,\"lon\":%s,\"alt\":0,\"time\":\"%s\"}",
-					lat_str,
-					lon_str,
-					ts_str
-					);
-			LOG_DBG("%s", json_buf);
-			slide_set(O_LAT, lat_str, strlen(lat_str));
-			slide_set(O_LON, lon_str, strlen(lon_str));
-
-			err = golioth_stream_push(client, "gps",
-					GOLIOTH_CONTENT_FORMAT_APP_JSON,
-					json_buf, strlen(json_buf));
-			if (err) LOG_ERR("Failed to send sensor data to Golioth: %d", err);	
-		}
+		err = golioth_stream_push(client, "gps",
+				GOLIOTH_CONTENT_FORMAT_APP_JSON,
+				json_buf, strlen(json_buf));
+		if (err) LOG_ERR("Failed to send sensor data to Golioth: %d", err);
 	}
 }
 
@@ -175,5 +216,6 @@ void app_work_init(struct golioth_client* work_client) {
 	uart_irq_rx_enable(uart_dev);
 
 	weather_dev = get_bme280_device();
+	weather_sensor_data_fetch();
 }
 
