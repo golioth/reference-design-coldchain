@@ -29,6 +29,7 @@ static int rx_buf_pos;
 
 static struct golioth_client *client;
 /* Add Sensor structs here */
+const struct device *weather_dev;
 
 /* Formatting string for sending sensor JSON to Golioth */
 #define JSON_FMT	"{\"counter\":%d}"
@@ -79,16 +80,53 @@ static int async_error_handler(struct golioth_req_rsp *rsp) {
 	return 0;
 }
 
+/*
+ * Get a device structure from a devicetree node with compatible
+ * "bosch,bme280". (If there are multiple, just pick one.)
+ */
+static const struct device *get_bme280_device(void)
+{
+	const struct device *const bme_dev = DEVICE_DT_GET_ANY(bosch_bme280);
+
+	if (bme_dev == NULL) {
+		/* No such node, or the node does not have status "okay". */
+		LOG_ERR("\nError: no device found.");
+		return NULL;
+	}
+
+	if (!device_is_ready(bme_dev)) {
+		LOG_ERR("Error: Device \"%s\" is not ready; "
+		       "check the driver initialization logs for errors.",
+		       bme_dev->name);
+		return NULL;
+	}
+
+	LOG_DBG("Found device \"%s\", getting sensor data", bme_dev->name);
+	return bme_dev;
+}
+
 /* This will be called by the main() loop */
 /* Do all of your work here! */
 void app_work_sensor_read(void) {
 	int err;
+	struct sensor_value tem, pre, hum;
 	char received_nmea[NMEA_SIZE];
 	static struct minmea_sentence_rmc frame;
 	char json_buf[128];
 	char ts_str[32];
 	char lat_str[12];
 	char lon_str[12];
+
+	sensor_sample_fetch(weather_dev);
+	sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP, &tem);
+	sensor_channel_get(weather_dev, SENSOR_CHAN_PRESS, &pre);
+	sensor_channel_get(weather_dev, SENSOR_CHAN_HUMIDITY, &hum);
+
+	LOG_INF("Temperature: %d.%06d Pressure: %d.%06d Humidity: %d.%06d",
+			tem.val1, tem.val2,
+			pre.val1, pre.val2,
+			hum.val1, hum.val2
+			);
 
 	while (k_msgq_get(&nmea_msgq, &received_nmea, K_NO_WAIT) == 0) {
 		bool success = minmea_parse_rmc(&frame, received_nmea);
@@ -135,5 +173,7 @@ void app_work_init(struct golioth_client* work_client) {
 	/* configure interrupt and callback to receive data */
 	uart_irq_callback_user_data_set(uart_dev, serial_cb, NULL);
 	uart_irq_rx_enable(uart_dev);
+
+	weather_dev = get_bme280_device();
 }
 
