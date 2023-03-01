@@ -14,6 +14,7 @@ LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
 #include <zephyr/drivers/uart.h>
 
 #include "app_work.h"
+#include "app_settings.h"
 #include "libostentus/libostentus.h"
 #include "lib/minmea/minmea.h"
 #include <stdio.h>
@@ -35,6 +36,9 @@ struct weather_data {
 	struct sensor_value pre;
 	struct sensor_value hum;
 };
+
+/* Global timestamp records when the previous GPS value was stored */
+uint64_t _last_gps = 0;
 
 /* Global to hold BME280 readings; updated at 1 Hz by thread */
 struct weather_data _latest_weather_data;
@@ -79,6 +83,41 @@ K_THREAD_DEFINE(weather_sensor_tid, WEATHER_STACK,
             weather_sensor_thread, NULL, NULL, NULL,
             K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
+/* This is called from the UART irq callback to try to get out fast */
+static void process_reading(char *raw_nmea) {
+	enum minmea_sentence_id sid;
+	sid = minmea_sentence_id(raw_nmea, false);
+	if (sid == MINMEA_SENTENCE_RMC) {
+		struct cold_chain_data cc_data;
+		bool success = minmea_parse_rmc(&cc_data.frame, raw_nmea);
+		if (success) {
+			uint64_t wait_for = _last_gps;
+			if (k_uptime_delta(&wait_for) >= ((uint64_t)get_gps_delay_s() * 1000)) {
+				if (cc_data.frame.valid == true) {
+					if (k_mutex_lock(&weather_mutex, K_MSEC(1)) == 0) {
+						cc_data.tem = _latest_weather_data.tem;
+						cc_data.pre = _latest_weather_data.pre;
+						cc_data.hum = _latest_weather_data.hum;
+						k_mutex_unlock(&weather_mutex);
+						/* if queue is full, message is silently dropped */
+						k_msgq_put(&nmea_msgq, &cc_data, K_NO_WAIT);
+
+						/* wait_for now contains the current timestamp. Store this
+						 * for the next reading. */
+						_last_gps = wait_for;
+					} else {
+						LOG_ERR("Couldn't read weather info, skipping this reading");
+					}
+				} else {
+					LOG_DBG("Skipping because satellite fix not established");
+				}
+			} else {
+				LOG_DBG("Ignoring reading due to gps_delay_s window");
+			}
+		}
+	}
+}
+
 /* UART callback */
 void serial_cb(const struct device *dev, void *user_data) {
 	uint8_t c;
@@ -100,30 +139,7 @@ void serial_cb(const struct device *dev, void *user_data) {
 				rx_buf[rx_buf_pos+1] = '\0';
 			}
 
-			/* if queue is full, message is silently dropped */
-			enum minmea_sentence_id sid;
-			sid = minmea_sentence_id(rx_buf, false);
-			if (sid == MINMEA_SENTENCE_RMC) {
-				struct cold_chain_data cc_data;
-				bool success = minmea_parse_rmc(&cc_data.frame, rx_buf);
-				if (success) {
-
-					if (cc_data.frame.valid == true) {
-						if (k_mutex_lock(&weather_mutex, K_MSEC(1)) == 0) {
-							cc_data.tem = _latest_weather_data.tem;
-							cc_data.pre = _latest_weather_data.pre;
-							cc_data.hum = _latest_weather_data.hum;
-							k_mutex_unlock(&weather_mutex);
-							k_msgq_put(&nmea_msgq, &cc_data, K_NO_WAIT);
-						} else {
-							LOG_ERR("Couldn't read weather info, skipping this reading");
-						}
-					} else {
-						LOG_DBG("Skipping because satellite fix not established");
-					}
-				}
-			}
-
+			process_reading(rx_buf);
 			/* reset the buffer (it was copied to the msgq) */
 			rx_buf_pos = 0;
 		} else if (rx_buf_pos < (sizeof(rx_buf) - 1)) {

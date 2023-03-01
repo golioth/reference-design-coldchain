@@ -10,10 +10,17 @@ LOG_MODULE_REGISTER(app_settings, LOG_LEVEL_DBG);
 #include <net/golioth/settings.h>
 #include "main.h"
 
+/* How long to wait between uploading to Golioth */
 static int32_t _loop_delay_s = 5;
+/* How long to wait between GPS readings */
+static int32_t _gps_delay_s = 3;
 
 int32_t get_loop_delay_s(void) {
 	return _loop_delay_s;
+}
+
+int32_t get_gps_delay_s(void) {
+	return _gps_delay_s;
 }
 
 enum golioth_settings_status on_setting(
