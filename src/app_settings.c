@@ -50,6 +50,28 @@ enum golioth_settings_status on_setting(
 			wake_system_thread();
 		}
 		return GOLIOTH_SETTINGS_SUCCESS;
+	} else if (strcmp(key, "GPS_DELAY_S") == 0) {
+		/* This setting is expected to be numeric, return an error if it's not */
+		if (value->type != GOLIOTH_SETTINGS_VALUE_TYPE_INT64) {
+			return GOLIOTH_SETTINGS_VALUE_FORMAT_NOT_VALID;
+		}
+
+		/* Limit to 12 hour max delay: [0, 43200] */
+		if (value->i64 < 0 || value->i64 > 43200) {
+			return GOLIOTH_SETTINGS_VALUE_OUTSIDE_RANGE;
+		}
+
+		/* Only update if value has changed */
+		if (_gps_delay_s == (int32_t)value->i64) {
+			LOG_DBG("Received GPS_DELAY_S already matches local value.");
+		}
+		else {
+			_gps_delay_s = (int32_t)value->i64;
+			LOG_INF("Set GPS delay to %d seconds", _gps_delay_s);
+
+			wake_system_thread();
+		}
+		return GOLIOTH_SETTINGS_SUCCESS;
 	}
 
 	/* If the setting is not recognized, we should return an error */
