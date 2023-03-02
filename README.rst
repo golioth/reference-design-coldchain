@@ -1,13 +1,19 @@
-Golioth Reference Design Template
-#################################
+Golioth Cold Chain Tracker Reference
+####################################
 
 Overview
 ********
 
-Use this repo as a template when beginning work on a new Golioth Reference
-Design. It is set up as a standalone repository, with all Golioth features
-implemented in basic form. Search the project for the word ``template`` and
-``rd_template`` and update those occurrences with your reference design's name.
+The Golioth Cold Chain Tracker monitors temperature and records readings along
+with GPS location/time data. This is a common use-case for shipping
+temperature-sensitive goods, providing proof that the cold chain was maintained
+during transport.
+
+GPS readings can be received as frequently as once-per-second. Each packet of
+GPS data is combined with temperature/pressure/humidity data and uploaded to
+Golioth as a historical record using the GPS timestamp. The reference design
+caches data, so that when the device is out of cellular range, it can still
+record for later upload.
 
 Local set up
 ************
@@ -21,9 +27,9 @@ Install the Python virtual environment (recommended)
 .. code-block:: console
 
    cd ~
-   mkdir golioth-reference-design-template
-   python -m venv golioth-reference-design-template/.venv
-   source golioth-reference-design-template/.venv/bin/activate
+   mkdir golioth-reference-design-gps
+   python -m venv golioth-reference-design-gps/.venv
+   source golioth-reference-design-gps/.venv/bin/activate
    pip install wheel west
 
 Use ``west`` to initialize and install
@@ -31,8 +37,8 @@ Use ``west`` to initialize and install
 
 .. code-block:: console
 
-   cd ~/golioth-reference-design-template
-   west init -m git@github.com:golioth/reference-design-template.git .
+   cd ~/golioth-reference-design-gps
+   west init -m git@github.com:golioth/reference-design-gps.git .
    west update
    west zephyr-export
    pip install -r deps/zephyr/scripts/requirements.txt
@@ -71,10 +77,20 @@ credentials and reboot:
 Golioth Features
 ****************
 
-This app currently implements Over-the-Air (OTA) firmware updates, Settings
-Service, Logging, and RPC. To adjust the delay between hello
-messages, set a ``LOOP_DELAY_S`` key with a interger value (seconds) in the
-Device Settings menu of the `Golioth Console`_.
+This app implements:
+
+* Over-the-Air (OTA) firmware updates * LightDB Stream for recording periodic
+  GPS and weather sensor readings to the `gps` endpoint.
+* Settings Service to adjust the delay between recording GPS readings, and the
+  delay between sending cached readings to Golioth
+* Remote Logging
+* Remote Procedure call (RPC) to reboot the device
+
+This reference design uses the following Settings Service keys. Add these
+key/value pairs in the Device Settings menu of the `Golioth Console`_.
+
+* ``LOOP_DELAY_S`` (seconds between uploading cached data to Golioth)
+* ``GPS_DELAY_S`` (settings to wait between recording GPS data)
 
 .. _Golioth Console: https://console.golioth.io
 .. _golioth-zephyr-boards: https://github.com/golioth/golioth-zephyr-boards
