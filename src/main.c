@@ -5,7 +5,7 @@
  */
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(golioth_rd_template, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(golioth_cold_chain, LOG_LEVEL_DBG);
 
 #include <modem/lte_lc.h>
 #include <net/golioth/system_client.h>

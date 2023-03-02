@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20.0)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-project(rd_template)
+project(cold_chain)
 
 include_directories(src/lib/inc)
 add_compile_definitions(timegm=mktime)
