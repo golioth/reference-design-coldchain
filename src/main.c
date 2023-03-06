@@ -129,6 +129,7 @@ void main(void)
 
 	/* Show Golioth Logo on Ostentus ePaper screen */
 	show_splash();
+	k_sleep(K_SECONDS(4));
 
 	/* Get system thread id so loop delay change event can wake main */
 	_system_thread = k_current_get();
