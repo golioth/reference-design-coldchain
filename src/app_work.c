@@ -48,6 +48,9 @@ K_MSGQ_DEFINE(nmea_msgq, sizeof(struct cold_chain_data), 64, 4);
 static char rx_buf[NMEA_SIZE];
 static int rx_buf_pos;
 
+#include "app_work.h"
+#include "libostentus/libostentus.h"
+
 static struct golioth_client *client;
 /* Add Sensor structs here */
 const struct device *weather_dev;
