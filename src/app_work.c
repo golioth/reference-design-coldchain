@@ -182,7 +182,8 @@ static const struct device *get_bme280_device(void)
 
 /* This will be called by the main() loop */
 /* Do all of your work here! */
-void app_work_sensor_read(void) {
+void app_work_sensor_read(void)
+{
 	int err;
 	struct cold_chain_data cached_data;
 	char json_buf[128];

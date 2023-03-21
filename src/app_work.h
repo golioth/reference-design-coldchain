@@ -7,7 +7,7 @@
 #ifndef __APP_WORK_H__
 #define __APP_WORK_H__
 
-void app_work_init(struct golioth_client* work_client);
+void app_work_init(struct golioth_client *work_client);
 void app_work_sensor_read(void);
 
 /**
@@ -18,7 +18,7 @@ typedef enum {
     O_LAT,
     O_LON,
     O_TEM
-}slide_key;
+} slide_key;
 
 #define O_LABEL_LAT "Latitude"
 #define O_LABEL_LON "Longitude"
