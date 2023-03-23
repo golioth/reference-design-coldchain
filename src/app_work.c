@@ -60,6 +60,9 @@ K_MUTEX_DEFINE(weather_mutex); /* Protect data */
 K_SEM_DEFINE(bme280_initialized_sem, 0, 1); /* Wait until sensor is ready */
 
 void weather_sensor_data_fetch(void) {
+	if (!weather_dev) {
+		return;
+	}
 	sensor_sample_fetch(weather_dev);
 	if (k_mutex_lock(&weather_mutex, K_MSEC(100)) == 0) {
 		sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP, &_latest_weather_data.tem);
