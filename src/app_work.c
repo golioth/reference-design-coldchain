@@ -22,6 +22,9 @@ LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
 #define UART_DEVICE_NODE DT_ALIAS(click_uart)
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
+#define UART_SEL DT_ALIAS(gnss7_sel)
+static const struct gpio_dt_spec gnss7_sel = GPIO_DT_SPEC_GET(UART_SEL, gpios);
+
 #define NMEA_SIZE 128
 
 struct cold_chain_data {
@@ -234,6 +237,13 @@ void app_work_sensor_read(void)
 void app_work_init(struct golioth_client* work_client) {
 	LOG_INF("Initializing UART");
 	client = work_client;
+
+	int err = gpio_pin_configure_dt(&gnss7_sel, GPIO_OUTPUT_ACTIVE);
+
+	if (err < 0) {
+		LOG_ERR("Unable to configure GNSS SEL Pin: %d", err);
+	}
+
 	/* configure interrupt and callback to receive data */
 	uart_irq_callback_user_data_set(uart_dev, serial_cb, NULL);
 	uart_irq_rx_enable(uart_dev);
