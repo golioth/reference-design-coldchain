@@ -145,5 +145,29 @@ The following RPCs can be initiated in the Remote Procedure Call menu of the
    * ``3``: ``LOG_LEVEL_INF``
    * ``4``: ``LOG_LEVEL_DBG``
 
+Hardware Variations
+*******************
+
+Nordic nRF9160 DK
+=================
+
+This reference design may be build for the `Nordic nRF9160 DK`_, with the
+`MikroE Arduino UNO click shield`_ to interface the two click boards.
+
+* Position the WEATHER click in Slot 1
+* Position the GNSS 7 click in Slot 2
+
+The click boards must be in this order for the GPS UART to work.
+
+Use the following commands to build and program. (Use the same console commands
+from above to provision this board after programming the firmware.)
+
+.. code-block:: console
+
+   $ (.venv) west build -b nrf9160dk_nrf9160_ns app -- -DCONFIG_MCUBOOT_IMAGE_VERSION=\"<your.semantic.version>\"
+   $ (.venv) west flash
+
 .. _Golioth Console: https://console.golioth.io
 .. _golioth-zephyr-boards: https://github.com/golioth/golioth-zephyr-boards
+.. _nRF9160 DK: https://www.nordicsemi.com/Products/Development-hardware/nrf9160-dk
+.. _MikroE Arduino UNO click shield: https://www.mikroe.com/arduino-uno-click-shield
