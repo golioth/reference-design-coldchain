@@ -178,6 +178,13 @@ extern void nmea_parser_thread(void *d0, void *d1, void *d2)
 
 		if (err) {
 			LOG_ERR("Unable to queue parsed coldchain data: %d", err);
+		} else {
+			uint32_t msg_cnt = k_msgq_num_used_get(&coldchain_msgq);
+
+			if (msg_cnt > 0 && (msg_cnt % 5 == 0)) {
+				LOG_INF("%d readings queued; %d slots remain", msg_cnt,
+					MAX_QUEUED_DATA - msg_cnt);
+			}
 		}
 	}
 }
