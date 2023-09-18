@@ -15,9 +15,15 @@ LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
 
 #include "app_work.h"
 #include "app_settings.h"
-#include "libostentus/libostentus.h"
 #include "lib/minmea/minmea.h"
 #include <stdio.h>
+
+#ifdef CONFIG_LIB_OSTENTUS
+#include <libostentus.h>
+#endif
+#ifdef CONFIG_ALUDEL_BATTERY_MONITOR
+#include "battery_monitor/battery.h"
+#endif
 
 #define UART_DEVICE_NODE DT_ALIAS(click_uart)
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
@@ -51,24 +57,23 @@ K_MSGQ_DEFINE(nmea_msgq, sizeof(struct cold_chain_data), 64, 4);
 static char rx_buf[NMEA_SIZE];
 static int rx_buf_pos;
 
-#include "app_work.h"
-#include "libostentus/libostentus.h"
-
 static struct golioth_client *client;
 /* Add Sensor structs here */
 const struct device *weather_dev;
 
 /* Thread reads weather sensor and provides easy access to latest data */
-K_MUTEX_DEFINE(weather_mutex); /* Protect data */
+K_MUTEX_DEFINE(weather_mutex);		    /* Protect data */
 K_SEM_DEFINE(bme280_initialized_sem, 0, 1); /* Wait until sensor is ready */
 
-void weather_sensor_data_fetch(void) {
+void weather_sensor_data_fetch(void)
+{
 	if (!weather_dev) {
 		return;
 	}
 	sensor_sample_fetch(weather_dev);
 	if (k_mutex_lock(&weather_mutex, K_MSEC(100)) == 0) {
-		sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP, &_latest_weather_data.tem);
+		sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP,
+				   &_latest_weather_data.tem);
 		sensor_channel_get(weather_dev, SENSOR_CHAN_PRESS, &_latest_weather_data.pre);
 		sensor_channel_get(weather_dev, SENSOR_CHAN_HUMIDITY, &_latest_weather_data.hum);
 		k_mutex_unlock(&weather_mutex);
@@ -79,21 +84,22 @@ void weather_sensor_data_fetch(void) {
 
 #define WEATHER_STACK 1024
 
-extern void weather_sensor_thread(void *d0, void *d1, void *d2) {
+extern void weather_sensor_thread(void *d0, void *d1, void *d2)
+{
 	/* Block until sensor is available */
 	k_sem_take(&bme280_initialized_sem, K_FOREVER);
-	while(1) {
+	while (1) {
 		weather_sensor_data_fetch();
 		k_sleep(K_SECONDS(1));
 	}
 }
 
-K_THREAD_DEFINE(weather_sensor_tid, WEATHER_STACK,
-            weather_sensor_thread, NULL, NULL, NULL,
-            K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
+K_THREAD_DEFINE(weather_sensor_tid, WEATHER_STACK, weather_sensor_thread, NULL, NULL, NULL,
+		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
 /* This is called from the UART irq callback to try to get out fast */
-static void process_reading(char *raw_nmea) {
+static void process_reading(char *raw_nmea)
+{
 	enum minmea_sentence_id sid;
 	sid = minmea_sentence_id(raw_nmea, false);
 	if (sid == MINMEA_SENTENCE_RMC) {
@@ -111,11 +117,13 @@ static void process_reading(char *raw_nmea) {
 						/* if queue is full, message is silently dropped */
 						k_msgq_put(&nmea_msgq, &cc_data, K_NO_WAIT);
 
-						/* wait_for now contains the current timestamp. Store this
-						 * for the next reading. */
+						/* wait_for now contains the current timestamp.
+						 * Store this for the next reading.
+						 */
 						_last_gps = wait_for;
 					} else {
-						LOG_ERR("Couldn't read weather info, skipping this reading");
+						LOG_ERR("Couldn't read weather info, skipping this "
+							"reading");
 					}
 				} else {
 					LOG_DBG("Skipping because satellite fix not established");
@@ -128,7 +136,8 @@ static void process_reading(char *raw_nmea) {
 }
 
 /* UART callback */
-void serial_cb(const struct device *dev, void *user_data) {
+void serial_cb(const struct device *dev, void *user_data)
+{
 	uint8_t c;
 
 	if (!uart_irq_update(uart_dev)) {
@@ -145,7 +154,7 @@ void serial_cb(const struct device *dev, void *user_data) {
 				rx_buf[rx_buf_pos] = '\0';
 			} else {
 				rx_buf[rx_buf_pos] = '\n';
-				rx_buf[rx_buf_pos+1] = '\0';
+				rx_buf[rx_buf_pos + 1] = '\0';
 			}
 
 			process_reading(rx_buf);
@@ -174,8 +183,8 @@ static const struct device *get_bme280_device(void)
 
 	if (!device_is_ready(bme_dev)) {
 		LOG_ERR("Error: Device \"%s\" is not ready; "
-		       "check the driver initialization logs for errors.",
-		       bme_dev->name);
+			"check the driver initialization logs for errors.",
+			bme_dev->name);
 		return NULL;
 	}
 
@@ -198,43 +207,50 @@ void app_work_sensor_read(void)
 	char lon_str[12];
 	char tem_str[12];
 
+	IF_ENABLED(CONFIG_ALUDEL_BATTERY_MONITOR, (
+		read_and_report_battery();
+		IF_ENABLED(CONFIG_LIB_OSTENTUS, (
+			slide_set(BATTERY_V, get_batt_v_str(), strlen(get_batt_v_str()));
+			slide_set(BATTERY_LVL, get_batt_lvl_str(), strlen(get_batt_lvl_str()));
+		));
+	));
+
 	while (k_msgq_get(&nmea_msgq, &cached_data, K_NO_WAIT) == 0) {
 
-		snprintf(lat_str, sizeof(lat_str), "%f", minmea_tocoord(&cached_data.frame.latitude));
-		snprintf(lon_str, sizeof(lon_str), "%f", minmea_tocoord(&cached_data.frame.longitude));
+		snprintf(lat_str, sizeof(lat_str), "%f",
+			 minmea_tocoord(&cached_data.frame.latitude));
+		snprintf(lon_str, sizeof(lon_str), "%f",
+			 minmea_tocoord(&cached_data.frame.longitude));
 		snprintf(ts_str, sizeof(ts_str), "20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-				cached_data.frame.date.year,
-				cached_data.frame.date.month,
-				cached_data.frame.date.day,
-				cached_data.frame.time.hours,
-				cached_data.frame.time.minutes,
-				cached_data.frame.time.seconds,
-				cached_data.frame.time.microseconds
-				);
-		snprintk(tem_str, sizeof(tem_str), "%d.%02dc", cached_data.tem.val1, cached_data.tem.val2 / 10000);
+			 cached_data.frame.date.year, cached_data.frame.date.month,
+			 cached_data.frame.date.day, cached_data.frame.time.hours,
+			 cached_data.frame.time.minutes, cached_data.frame.time.seconds,
+			 cached_data.frame.time.microseconds);
+		snprintk(tem_str, sizeof(tem_str), "%d.%02dc", cached_data.tem.val1,
+			 cached_data.tem.val2 / 10000);
 
 		snprintk(json_buf, sizeof(json_buf),
-				"{\"lat\":%s,\"lon\":%s,\"time\":\"%s\",\"tem\":%d.%06d,\"pre\":%d.%06d,\"hum\":%d.%06d}",
-				lat_str,
-				lon_str,
-				ts_str,
-				cached_data.tem.val1, cached_data.tem.val2,
-				cached_data.pre.val1, cached_data.pre.val2,
-				cached_data.hum.val1, cached_data.hum.val2
-				);
+			 "{\"lat\":%s,\"lon\":%s,\"time\":\"%s\",\"tem\":%d.%06d,\"pre\":%d.%06d,"
+			 "\"hum\":%d.%06d}",
+			 lat_str, lon_str, ts_str, cached_data.tem.val1, cached_data.tem.val2,
+			 cached_data.pre.val1, cached_data.pre.val2, cached_data.hum.val1,
+			 cached_data.hum.val2);
 		LOG_DBG("%s", json_buf);
-		slide_set(O_LAT, lat_str, strlen(lat_str));
-		slide_set(O_LON, lon_str, strlen(lon_str));
-		slide_set(O_TEM, tem_str, strlen(tem_str));
+		IF_ENABLED(CONFIG_LIB_OSTENTUS, (
+			slide_set(SLIDE_LAT, lat_str, strlen(lat_str));
+			slide_set(SLIDE_LON, lon_str, strlen(lon_str));
+			slide_set(SLIDE_TEM, tem_str, strlen(tem_str));
+		));
 
-		err = golioth_stream_push(client, "gps",
-				GOLIOTH_CONTENT_FORMAT_APP_JSON,
-				json_buf, strlen(json_buf));
-		if (err) LOG_ERR("Failed to send sensor data to Golioth: %d", err);
+		err = golioth_stream_push(client, "gps", GOLIOTH_CONTENT_FORMAT_APP_JSON, json_buf,
+					  strlen(json_buf));
+		if (err)
+			LOG_ERR("Failed to send sensor data to Golioth: %d", err);
 	}
 }
 
-void app_work_init(struct golioth_client* work_client) {
+void app_work_init(struct golioth_client *work_client)
+{
 	LOG_INF("Initializing UART");
 	client = work_client;
 
@@ -251,4 +267,3 @@ void app_work_init(struct golioth_client* work_client) {
 	weather_dev = get_bme280_device();
 	weather_sensor_data_fetch();
 }
-

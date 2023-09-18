@@ -1,3 +1,7 @@
+..
+   Copyright (c) 2023 Golioth, Inc.
+   SPDX-License-Identifier: Apache-2.0
+
 Golioth Cold Chain Tracker Reference
 ####################################
 
@@ -24,7 +28,7 @@ set up your local workspace.
 Install the Python virtual environment (recommended)
 ====================================================
 
-.. code-block:: console
+.. code-block:: shell
 
    cd ~
    mkdir golioth-reference-design-gps
@@ -35,7 +39,7 @@ Install the Python virtual environment (recommended)
 Use ``west`` to initialize and install
 ======================================
 
-.. code-block:: console
+.. code-block:: shell
 
    cd ~/golioth-reference-design-gps
    west init -m git@github.com:golioth/reference-design-gps.git .
@@ -43,16 +47,13 @@ Use ``west`` to initialize and install
    west zephyr-export
    pip install -r deps/zephyr/scripts/requirements.txt
 
-This will also install the `golioth-zephyr-boards`_ definitions for the Golioth
-Aludel-Mini.
-
 Building the application
 ************************
 
 Build Zephyr sample application for Golioth Aludel-Mini
 (``aludel_mini_v1_sparkfun9160_ns``) from the top level of your project. After a
 successful build you will see a new ``build`` directory. Note that any changes
-(and git commmits) to the project itself will be inside the ``app`` folder. The
+(and git commits) to the project itself will be inside the ``app`` folder. The
 ``build`` and ``deps`` directories being one level higher prevents the repo from
 cataloging all of the changes to the dependencies and the build (so no
 ``.gitignore`` is needed)
@@ -60,15 +61,15 @@ cataloging all of the changes to the dependencies and the build (so no
 During building, replace ``<your.semantic.version>`` to utilize the DFU
 functionality on this Reference Design.
 
-.. code-block:: console
+.. code-block:: text
 
-   $ (.venv) west build -b aludel_mini_v1_sparkfun9160_ns app -- -DCONFIG_MCUBOOT_IMAGE_VERSION=\"<your.semantic.version>\"
+   $ (.venv) west build -p -b aludel_mini_v1_sparkfun9160_ns app -- -DCONFIG_MCUBOOT_IMAGE_VERSION=\"<your.semantic.version>\"
    $ (.venv) west flash
 
 Configure PSK-ID and PSK using the device shell based on your Golioth
 credentials and reboot:
 
-.. code-block:: console
+.. code-block:: text
 
    uart:~$ settings set golioth/psk-id <my-psk-id@my-project>
    uart:~$ settings set golioth/psk <my-psk>
@@ -98,8 +99,9 @@ The following settings should be set in the Device Settings menu of the
 
    Default value is ``5`` seconds.
 
-``GPS_DELAY_S`` Adjusts the delay between recording GPS readings. Set to an
-integer value (seconds).
+``GPS_DELAY_S``
+   Adjusts the delay between recording GPS readings. Set to an
+   integer value (seconds).
 
    Default value is ``3`` seconds.
 
@@ -109,26 +111,8 @@ Remote Procedure Call (RPC) Service
 The following RPCs can be initiated in the Remote Procedure Call menu of the
 `Golioth Console`_.
 
-``reboot``
-   Reboot the system.
-
-``set_log_level``
-   Set the log level.
-
-   The method takes a single parameter which can be one of the following integer
-   values:
-
-   * ``0``: ``LOG_LEVEL_NONE``
-   * ``1``: ``LOG_LEVEL_ERR``
-   * ``2``: ``LOG_LEVEL_WRN``
-   * ``3``: ``LOG_LEVEL_INF``
-   * ``4``: ``LOG_LEVEL_DBG``
-
-Remote Procedure Call (RPC) Service
-===================================
-
-The following RPCs can be initiated in the Remote Procedure Call menu of the
-`Golioth Console`_.
+``get_network_info``
+   Query and return network information.
 
 ``reboot``
    Reboot the system.
@@ -144,6 +128,7 @@ The following RPCs can be initiated in the Remote Procedure Call menu of the
    * ``2``: ``LOG_LEVEL_WRN``
    * ``3``: ``LOG_LEVEL_INF``
    * ``4``: ``LOG_LEVEL_DBG``
+
 
 Hardware Variations
 *******************
@@ -167,7 +152,54 @@ from above to provision this board after programming the firmware.)
    $ (.venv) west build -b nrf9160dk_nrf9160_ns app -- -DCONFIG_MCUBOOT_IMAGE_VERSION=\"<your.semantic.version>\"
    $ (.venv) west flash
 
+External Libraries
+******************
+
+The following code libraries are installed by default. If you are not using the
+custom hardware to which they apply, you can safely remove these repositories
+from ``west.yml`` and remove the includes/function calls from the C code.
+
+* `golioth-zephyr-boards`_ includes the board definitions for the Golioth
+  Aludel-Mini
+* `libostentus`_ is a helper library for controlling the Ostentus ePaper
+  faceplate
+* `zephyr-network-info`_ is a helper library for querying, formatting, and returning network
+  connection information via Zephyr log or Golioth RPC
+
+Using this template to start a new project
+******************************************
+
+Fork this template to create your own Reference Design. After checking out your fork, we recommend
+the following workflow to pull in future changes:
+
+* Setup
+
+  * Create a ``template`` remote based on the Reference Design Template repository
+
+* Merge in template changes
+
+  * Fetch template changes and tags
+  * Merge template release tag into your ``main`` (or other branch)
+  * Resolve merge conflicts (if any) and commit to your repository
+
+.. code-block:: shell
+
+   # Setup
+   git remote add template https://github.com/golioth/reference-design-template.git
+   git fetch template --tags
+
+   # Merge in template changes
+   git fetch template --tags
+   git checkout your_local_branch
+   git merge template_v1.0.0
+
+   # Resolve merge conflicts if necessary
+   git add resolved_files
+   git commit
+
 .. _Golioth Console: https://console.golioth.io
-.. _golioth-zephyr-boards: https://github.com/golioth/golioth-zephyr-boards
-.. _nRF9160 DK: https://www.nordicsemi.com/Products/Development-hardware/nrf9160-dk
+.. _Nordic nRF9160 DK: https://www.nordicsemi.com/Products/Development-hardware/nrf9160-dk
 .. _MikroE Arduino UNO click shield: https://www.mikroe.com/arduino-uno-click-shield
+.. _golioth-zephyr-boards: https://github.com/golioth/golioth-zephyr-boards
+.. _libostentus: https://github.com/golioth/libostentus
+.. _zephyr-network-info: https://github.com/golioth/zephyr-network-info
