@@ -33,6 +33,9 @@ static const struct gpio_dt_spec gnss7_sel = GPIO_DT_SPEC_GET(UART_SEL, gpios);
 
 #define NMEA_SIZE 128
 
+/* Max number of parsed readings to queue between uploads (96 bytes each) */
+#define MAX_QUEUED_DATA 500
+
 struct cold_chain_data {
 	struct sensor_value tem;
 	struct sensor_value pre;
@@ -52,7 +55,8 @@ uint64_t _last_gps = 0;
 /* Global to hold BME280 readings; updated at 1 Hz by thread */
 struct weather_data _latest_weather_data;
 
-K_MSGQ_DEFINE(nmea_msgq, sizeof(struct cold_chain_data), 64, 4);
+/* Processed data waiting to be sent to Golioth */
+K_MSGQ_DEFINE(coldchain_msgq, sizeof(struct cold_chain_data), MAX_QUEUED_DATA, 4);
 
 static char rx_buf[NMEA_SIZE];
 static int rx_buf_pos;
@@ -71,15 +75,13 @@ void weather_sensor_data_fetch(void)
 		return;
 	}
 	sensor_sample_fetch(weather_dev);
-	if (k_mutex_lock(&weather_mutex, K_MSEC(100)) == 0) {
-		sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP,
-				   &_latest_weather_data.tem);
-		sensor_channel_get(weather_dev, SENSOR_CHAN_PRESS, &_latest_weather_data.pre);
-		sensor_channel_get(weather_dev, SENSOR_CHAN_HUMIDITY, &_latest_weather_data.hum);
-		k_mutex_unlock(&weather_mutex);
-	} else {
-		LOG_DBG("Unable to lock mutex to read weather sensor");
-	}
+	k_mutex_lock(&weather_mutex, K_FOREVER);
+
+	sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP, &_latest_weather_data.tem);
+	sensor_channel_get(weather_dev, SENSOR_CHAN_PRESS, &_latest_weather_data.pre);
+	sensor_channel_get(weather_dev, SENSOR_CHAN_HUMIDITY, &_latest_weather_data.hum);
+
+	k_mutex_unlock(&weather_mutex);
 }
 
 #define WEATHER_STACK 1024
@@ -97,43 +99,91 @@ extern void weather_sensor_thread(void *d0, void *d1, void *d2)
 K_THREAD_DEFINE(weather_sensor_tid, WEATHER_STACK, weather_sensor_thread, NULL, NULL, NULL,
 		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
-/* This is called from the UART irq callback to try to get out fast */
-static void process_reading(char *raw_nmea)
+/**
+ * @brief Check of gps_delay_s has passed since the last GPS reading was taken.
+ *
+ * @param update_stored_time if this param is true, and the return value is true, current time will
+ * be stored as the most recent GPS reading.
+ *
+ * @return true if gps_delay_s has passed since last GPS reading, otherwise false
+ */
+bool time_for_gps_reading(bool update_stored_time)
 {
-	enum minmea_sentence_id sid;
-	sid = minmea_sentence_id(raw_nmea, false);
-	if (sid == MINMEA_SENTENCE_RMC) {
-		struct cold_chain_data cc_data;
-		bool success = minmea_parse_rmc(&cc_data.frame, raw_nmea);
-		if (success) {
-			uint64_t wait_for = _last_gps;
-			if (k_uptime_delta(&wait_for) >= ((uint64_t)get_gps_delay_s() * 1000)) {
-				if (cc_data.frame.valid == true) {
-					if (k_mutex_lock(&weather_mutex, K_MSEC(1)) == 0) {
-						cc_data.tem = _latest_weather_data.tem;
-						cc_data.pre = _latest_weather_data.pre;
-						cc_data.hum = _latest_weather_data.hum;
-						k_mutex_unlock(&weather_mutex);
-						/* if queue is full, message is silently dropped */
-						k_msgq_put(&nmea_msgq, &cc_data, K_NO_WAIT);
+	uint64_t wait_for = _last_gps;
 
-						/* wait_for now contains the current timestamp.
-						 * Store this for the next reading.
-						 */
-						_last_gps = wait_for;
-					} else {
-						LOG_ERR("Couldn't read weather info, skipping this "
-							"reading");
-					}
-				} else {
-					LOG_DBG("Skipping because satellite fix not established");
-				}
-			} else {
-				LOG_DBG("Ignoring reading due to gps_delay_s window");
-			}
+	if (k_uptime_delta(&wait_for) >= ((uint64_t)get_gps_delay_s() * 1000)) {
+		if (update_stored_time) {
+			/* wait_for now contains the current timestamp. Store this
+			 * for the next reading.
+			 */
+			_last_gps = wait_for;
+		}
+
+		return true;
+	}
+	return false;
+}
+
+
+/* Raw string data waiting for the NMEA parser to run */
+K_MSGQ_DEFINE(reading_msgq, NMEA_SIZE, 16, 4);
+
+#define PARSER_STACK 1024
+
+extern void nmea_parser_thread(void *d0, void *d1, void *d2)
+{
+	char raw_readings[NMEA_SIZE];
+	enum minmea_sentence_id sid;
+	int err;
+
+	while (1) {
+		k_msgq_get(&reading_msgq, &raw_readings, K_FOREVER);
+		sid = minmea_sentence_id(raw_readings, false);
+
+		if (sid != MINMEA_SENTENCE_RMC) {
+			/* We only care about RMC sentences because that's the data we need */
+			continue;
+		}
+
+		struct cold_chain_data cc_data;
+		bool success = minmea_parse_rmc(&cc_data.frame, raw_readings);
+
+		if (!success) {
+			/* Failed to partse NMEA sentence */
+			continue;
+		}
+
+		if (cc_data.frame.valid != true) {
+			/* TODO: no satellite lock, log info about tracking progress */
+			continue;
+		}
+
+		if (!time_for_gps_reading(true)) {
+			/* gps_delay_s has not elapsed since last reading */
+			continue;
+		}
+
+		err = k_mutex_lock(&weather_mutex, K_MSEC(50));
+
+		if (err) {
+			LOG_ERR("Cannot access weather data: %d", err);
+		} else {
+			cc_data.tem = _latest_weather_data.tem;
+			cc_data.pre = _latest_weather_data.pre;
+			cc_data.hum = _latest_weather_data.hum;
+			k_mutex_unlock(&weather_mutex);
+		}
+
+		err = k_msgq_put(&coldchain_msgq, &cc_data, K_MSEC(1));
+
+		if (err) {
+			LOG_ERR("Unable to queue parsed coldchain data: %d", err);
 		}
 	}
 }
+
+K_THREAD_DEFINE(nmea_parser_tid, PARSER_STACK, nmea_parser_thread, NULL, NULL, NULL,
+		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
 /* UART callback */
 void serial_cb(const struct device *dev, void *user_data)
@@ -157,7 +207,10 @@ void serial_cb(const struct device *dev, void *user_data)
 				rx_buf[rx_buf_pos + 1] = '\0';
 			}
 
-			process_reading(rx_buf);
+			if (k_msgq_put(&reading_msgq, &rx_buf, K_NO_WAIT) != 0) {
+				LOG_ERR("Message queue full, dropping reading.");
+			}
+
 			/* reset the buffer (it was copied to the msgq) */
 			rx_buf_pos = 0;
 		} else if (rx_buf_pos < (sizeof(rx_buf) - 1)) {
@@ -215,7 +268,7 @@ void app_work_sensor_read(void)
 		));
 	));
 
-	while (k_msgq_get(&nmea_msgq, &cached_data, K_NO_WAIT) == 0) {
+	while (k_msgq_get(&coldchain_msgq, &cached_data, K_NO_WAIT) == 0) {
 
 		snprintf(lat_str, sizeof(lat_str), "%f",
 			 minmea_tocoord(&cached_data.frame.latitude));
