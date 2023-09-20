@@ -53,9 +53,6 @@ struct weather_data {
 	struct sensor_value hum;
 };
 
-/* Global timestamp records when the previous GPS value was stored */
-uint64_t _last_gps = 0;
-
 /* Global to hold BME280 readings; updated at 1 Hz by thread */
 struct weather_data _latest_weather_data;
 
@@ -103,26 +100,30 @@ extern void weather_sensor_thread(void *d0, void *d1, void *d2)
 K_THREAD_DEFINE(weather_sensor_tid, WEATHER_STACK, weather_sensor_thread, NULL, NULL, NULL,
 		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
-/**
- * @brief Check of gps_delay_s has passed since the last GPS reading was taken.
+/** @brief Check if a given time delay has passed
  *
- * @param update_stored_time if this param is true, and the return value is true, current time will
- * be stored as the most recent GPS reading.
+ * The stored start time is used to generate a delta time from the system clock. If the delta time
+ * is smaller than the given delay, this function returns false. If the result is true, the stored
+ * value may be replaced by the current system time using the update param.
+ *
+ * @param stored_start_time stored system time in ms used as start time
+ * @param delay_s delay (in seconds)
+ * @param update_stored_time if function if returning true, this enables current time to replace the
+ * stored time value.
  *
  * @return true if gps_delay_s has passed since last GPS reading, otherwise false
  */
-bool time_for_gps_reading(bool update_stored_time)
+static bool target_time_elapsed(uint64_t *stored_start_time, uint32_t delay_s,
+				bool update_stored_time)
 {
-	uint64_t wait_for = _last_gps;
+	uint64_t wait_for = *stored_start_time;
 
-	if (k_uptime_delta(&wait_for) >= ((uint64_t)get_gps_delay_s() * 1000)) {
+	if (k_uptime_delta(&wait_for) >= ((uint64_t)delay_s * 1000)) {
 		if (update_stored_time) {
-			/* wait_for now contains the current timestamp. Store this
-			 * for the next reading.
+			/* wait_for now contains the current timestamp. Store this for the next
+			 * reading.
 			 */
-			_last_gps = wait_for;
-		}
-
+			*stored_start_time = wait_for; }
 		return true;
 	}
 	return false;
@@ -138,11 +139,29 @@ extern void nmea_parser_thread(void *d0, void *d1, void *d2)
 {
 	char raw_readings[NMEA_SIZE];
 	enum minmea_sentence_id sid;
+	bool sat_lock = false;
 	int err;
+
+	/* timestamp when the previous GPS value was stored */
+	uint64_t last_gps = 0;
+
+	/* timestamp when the previous satellite lock message was sent */
+	uint64_t last_sat_msg = 0;
 
 	while (1) {
 		k_msgq_get(&reading_msgq, &raw_readings, K_FOREVER);
 		sid = minmea_sentence_id(raw_readings, false);
+
+		if (!sat_lock && sid == MINMEA_SENTENCE_GSV) {
+
+			if (target_time_elapsed(&last_sat_msg, 3, true)) {
+				struct minmea_sentence_gsv lock_frame;
+
+				minmea_parse_gsv(&lock_frame, raw_readings);
+				LOG_INF("Awaiting GPS lock. Satellite count: %d",
+					lock_frame.total_sats);
+			}
+		}
 
 		if (sid != MINMEA_SENTENCE_RMC) {
 			/* We only care about RMC sentences because that's the data we need */
@@ -157,12 +176,13 @@ extern void nmea_parser_thread(void *d0, void *d1, void *d2)
 			continue;
 		}
 
-		if (cc_data.frame.valid != true) {
-			/* TODO: no satellite lock, log info about tracking progress */
+		sat_lock = cc_data.frame.valid;
+
+		if (!sat_lock) {
 			continue;
 		}
 
-		if (!time_for_gps_reading(true)) {
+		if (!target_time_elapsed(&last_gps, get_gps_delay_s(), true)) {
 			/* gps_delay_s has not elapsed since last reading */
 			continue;
 		}
