@@ -129,6 +129,20 @@ static bool target_time_elapsed(uint64_t *stored_start_time, uint32_t delay_s,
 	return false;
 }
 
+#ifdef CONFIG_LIB_OSTENTUS
+static void update_ostentus_gps(float lat, float lon, char *tem_str, char tem_len)
+{
+	char lat_str[12];
+	char lon_str[12];
+
+	snprintk(lat_str, sizeof(lat_str), "%f", lat);
+	snprintk(lon_str, sizeof(lon_str), "%f", lon);
+
+	slide_set(SLIDE_LAT, lat_str, strlen(lat_str));
+	slide_set(SLIDE_LON, lon_str, strlen(lon_str));
+	slide_set(SLIDE_TEM, tem_str, tem_len);
+}
+#endif
 
 /* Raw string data waiting for the NMEA parser to run */
 K_MSGQ_DEFINE(reading_msgq, NMEA_SIZE, 16, 4);
@@ -203,16 +217,19 @@ extern void nmea_parser_thread(void *d0, void *d1, void *d2)
 		if (err) {
 			LOG_ERR("Unable to queue parsed coldchain data: %d", err);
 		} else {
-			LOG_DBG("nmea: %s t: %d.%02dc",
-				raw_readings,
-				cc_data.tem.val1,
-				cc_data.tem.val2 / 10000);
+			char tem_str[12];
 
-			/* FIXME
-			 * slide_set(O_LAT, lat_str, strlen(lat_str));
-			 * slide_set(O_LON, lon_str, strlen(lon_str));
-			 * slide_set(O_TEM, tem_str, strlen(tem_str));
-			 */
+			snprintk(tem_str, sizeof(tem_str), "%d.%02dc",
+				 cc_data.tem.val1,
+				 cc_data.tem.val2 / 10000);
+
+			LOG_DBG("nmea: %s t: %s", raw_readings, tem_str);
+
+			IF_ENABLED(CONFIG_LIB_OSTENTUS, (
+				update_ostentus_gps(minmea_tocoord(&cc_data.frame.latitude),
+						    minmea_tocoord(&cc_data.frame.longitude),
+						    tem_str, strlen(tem_str));
+			));
 
 			uint32_t msg_cnt = k_msgq_num_used_get(&coldchain_msgq);
 
