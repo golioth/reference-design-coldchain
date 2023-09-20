@@ -17,6 +17,7 @@ LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
 #include "app_settings.h"
 #include "lib/minmea/minmea.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef CONFIG_LIB_OSTENTUS
 #include <libostentus.h>
@@ -35,6 +36,9 @@ static const struct gpio_dt_spec gnss7_sel = GPIO_DT_SPEC_GET(UART_SEL, gpios);
 
 /* Max number of parsed readings to queue between uploads (96 bytes each) */
 #define MAX_QUEUED_DATA 500
+
+/* GPS stream endpoint on Golioth */
+#define GPS_ENDP "gps"
 
 struct cold_chain_data {
 	struct sensor_value tem;
@@ -179,6 +183,17 @@ extern void nmea_parser_thread(void *d0, void *d1, void *d2)
 		if (err) {
 			LOG_ERR("Unable to queue parsed coldchain data: %d", err);
 		} else {
+			LOG_DBG("nmea: %s t: %d.%02dc",
+				raw_readings,
+				cc_data.tem.val1,
+				cc_data.tem.val2 / 10000);
+
+			/* FIXME
+			 * slide_set(O_LAT, lat_str, strlen(lat_str));
+			 * slide_set(O_LON, lon_str, strlen(lon_str));
+			 * slide_set(O_TEM, tem_str, strlen(tem_str));
+			 */
+
 			uint32_t msg_cnt = k_msgq_num_used_get(&coldchain_msgq);
 
 			if (msg_cnt > 0 && (msg_cnt % 5 == 0)) {
@@ -255,18 +270,85 @@ static const struct device *get_bme280_device(void)
 	return bme_dev;
 }
 
+static void batch_upload_to_golioth(void)
+{
+	uint32_t msg_cnt = k_msgq_num_used_get(&coldchain_msgq);
+
+	if (msg_cnt == 0) {
+		return;
+	}
+
+	LOG_INF("Uploading cached data to Golioth");
+
+	/* Packets will be no larger than 1024 characters
+	 *
+	 * {"lat":-90.123456,"lon":-180.123456,"time":"2023-09-18T22:52:42.000Z","tem":-100.123456,
+	 *  "pre":-100.123456,"hum":-100.123456}"
+	 *
+	 * Round up for the comma, and overall open/close bracket.
+	 * Size the overall buffer to be smaller than 1024 which is most efficient for Golioth
+	 */
+	static const char r_fmt[] = "{\"lat\":%f,\"lon\":%f,\""
+				    "time\":\"20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ\","
+			     	    "\"tem\":%d.%06d,\"pre\":%d.%06d,\"hum\":%d.%06d}";
+	const uint8_t r_maxlen = 128;
+	const uint16_t buf_len = 1000;
+	uint16_t remaining_len;
+	uint16_t tot_pushed = 0;
+	char buf[buf_len];
+	struct cold_chain_data cached_data;
+
+	snprintk(buf, sizeof(buf), "%s", "[");
+
+	while (msg_cnt > 0) {
+		int err = k_msgq_get(&coldchain_msgq, &cached_data, K_MSEC(10));
+
+		if (err) {
+			LOG_ERR("Error fetching cached reading: %d", err);
+			return;
+		}
+
+		snprintk(buf + strlen(buf), buf_len - strlen(buf), r_fmt,
+			 minmea_tocoord(&cached_data.frame.latitude),
+			 minmea_tocoord(&cached_data.frame.longitude),
+			 cached_data.frame.date.year, cached_data.frame.date.month,
+			 cached_data.frame.date.day, cached_data.frame.time.hours,
+			 cached_data.frame.time.minutes, cached_data.frame.time.seconds,
+			 cached_data.frame.time.microseconds,
+			 cached_data.tem.val1, abs(cached_data.tem.val2),
+			 cached_data.pre.val1, abs(cached_data.pre.val2),
+			 cached_data.hum.val1, abs(cached_data.hum.val2));
+
+		msg_cnt = k_msgq_num_used_get(&coldchain_msgq);
+		remaining_len = sizeof(buf) - strlen(buf) - 1;
+		tot_pushed++;
+
+		if (msg_cnt == 0 || remaining_len < r_maxlen) {
+			snprintk(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s", "]");
+			int err = golioth_stream_push(client, GPS_ENDP,
+						      GOLIOTH_CONTENT_FORMAT_APP_JSON,
+						      buf, strlen(buf));
+
+			if (err) {
+				LOG_ERR("Failed to send sensor data to Golioth: %d", err);
+				return;
+			}
+
+			if (msg_cnt) {
+				snprintk(buf, sizeof(buf), "%s", "[");
+			}
+		} else {
+			snprintk(buf + strlen(buf), buf_len - strlen(buf), "%s", ",");
+		}
+	}
+
+	LOG_INF("Pushed %d cached readings up to Golioth.", tot_pushed);
+}
+
 /* This will be called by the main() loop */
 /* Do all of your work here! */
 void app_work_sensor_read(void)
 {
-	int err;
-	struct cold_chain_data cached_data;
-	char json_buf[128];
-	char ts_str[32];
-	char lat_str[12];
-	char lon_str[12];
-	char tem_str[12];
-
 	IF_ENABLED(CONFIG_ALUDEL_BATTERY_MONITOR, (
 		read_and_report_battery();
 		IF_ENABLED(CONFIG_LIB_OSTENTUS, (
@@ -275,37 +357,8 @@ void app_work_sensor_read(void)
 		));
 	));
 
-	while (k_msgq_get(&coldchain_msgq, &cached_data, K_NO_WAIT) == 0) {
-
-		snprintf(lat_str, sizeof(lat_str), "%f",
-			 minmea_tocoord(&cached_data.frame.latitude));
-		snprintf(lon_str, sizeof(lon_str), "%f",
-			 minmea_tocoord(&cached_data.frame.longitude));
-		snprintf(ts_str, sizeof(ts_str), "20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-			 cached_data.frame.date.year, cached_data.frame.date.month,
-			 cached_data.frame.date.day, cached_data.frame.time.hours,
-			 cached_data.frame.time.minutes, cached_data.frame.time.seconds,
-			 cached_data.frame.time.microseconds);
-		snprintk(tem_str, sizeof(tem_str), "%d.%02dc", cached_data.tem.val1,
-			 cached_data.tem.val2 / 10000);
-
-		snprintk(json_buf, sizeof(json_buf),
-			 "{\"lat\":%s,\"lon\":%s,\"time\":\"%s\",\"tem\":%d.%06d,\"pre\":%d.%06d,"
-			 "\"hum\":%d.%06d}",
-			 lat_str, lon_str, ts_str, cached_data.tem.val1, cached_data.tem.val2,
-			 cached_data.pre.val1, cached_data.pre.val2, cached_data.hum.val1,
-			 cached_data.hum.val2);
-		LOG_DBG("%s", json_buf);
-		IF_ENABLED(CONFIG_LIB_OSTENTUS, (
-			slide_set(SLIDE_LAT, lat_str, strlen(lat_str));
-			slide_set(SLIDE_LON, lon_str, strlen(lon_str));
-			slide_set(SLIDE_TEM, tem_str, strlen(tem_str));
-		));
-
-		err = golioth_stream_push(client, "gps", GOLIOTH_CONTENT_FORMAT_APP_JSON, json_buf,
-					  strlen(json_buf));
-		if (err)
-			LOG_ERR("Failed to send sensor data to Golioth: %d", err);
+	if (golioth_is_connected(client)) {
+		batch_upload_to_golioth();
 	}
 }
 
