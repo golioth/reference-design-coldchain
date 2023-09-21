@@ -31,9 +31,9 @@ Install the Python virtual environment (recommended)
 .. code-block:: shell
 
    cd ~
-   mkdir golioth-reference-design-gps
-   python -m venv golioth-reference-design-gps/.venv
-   source golioth-reference-design-gps/.venv/bin/activate
+   mkdir golioth-reference-design-coldchain
+   python -m venv golioth-reference-design-coldchain/.venv
+   source golioth-reference-design-coldchain/.venv/bin/activate
    pip install wheel west
 
 Use ``west`` to initialize and install
@@ -41,8 +41,8 @@ Use ``west`` to initialize and install
 
 .. code-block:: shell
 
-   cd ~/golioth-reference-design-gps
-   west init -m git@github.com:golioth/reference-design-gps.git .
+   cd ~/golioth-reference-design-coldchain
+   west init -m https://github.com/golioth/reference-design-coldchain.git .
    west update
    west zephyr-export
    pip install -r deps/zephyr/scripts/requirements.txt
