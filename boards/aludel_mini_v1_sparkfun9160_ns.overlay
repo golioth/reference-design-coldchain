@@ -17,6 +17,10 @@
 	current-speed = <38400>;
 };
 
+&spi2 {
+	status = "disabled";
+};
+
 &i2c1 {
 	zephyr,concat-buf-size = <48>;
 

@@ -12,6 +12,8 @@
 
 int32_t get_loop_delay_s(void);
 int32_t get_gps_delay_s(void);
-int app_register_settings(struct golioth_client *settings_client);
+int app_settings_init(struct golioth_client *state_client);
+int app_settings_observe(void);
+int app_settings_register(struct golioth_client *settings_client);
 
 #endif /* __APP_SETTINGS_H__ */
