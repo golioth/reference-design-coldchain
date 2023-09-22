@@ -78,6 +78,9 @@ K_SEM_DEFINE(bme280_initialized_sem, 0, 1); /* Wait until sensor is ready */
 void weather_sensor_data_fetch(void)
 {
 	if (!weather_dev) {
+		_latest_weather_data.tem = reading_error;
+		_latest_weather_data.pre = reading_error;
+		_latest_weather_data.hum = reading_error;
 		return;
 	}
 	sensor_sample_fetch(weather_dev);
@@ -316,6 +319,15 @@ static const struct device *get_bme280_device(void)
 	return bme_dev;
 }
 
+static void get_sensor_string_or_empty(struct sensor_value v, char *buf, uint8_t buf_len, char *key)
+{
+	if ((v.val1 == reading_error.val1) && (v.val2 == reading_error.val2)) {
+		buf[0] = '\0';
+	} else {
+		snprintk(buf, buf_len, ",\"%s\":%d.%06d", key, v.val1, abs(v.val2));
+	}
+}
+
 static void batch_upload_to_golioth(void)
 {
 	uint32_t msg_cnt = k_msgq_num_used_get(&coldchain_msgq);
@@ -335,8 +347,8 @@ static void batch_upload_to_golioth(void)
 	 * Size the overall buffer to be smaller than 1024 which is most efficient for Golioth
 	 */
 	static const char r_fmt[] = "{\"lat\":%f,\"lon\":%f,\""
-				    "time\":\"20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ\","
-			     	    "\"tem\":%d.%06d,\"pre\":%d.%06d,\"hum\":%d.%06d}";
+				    "time\":\"20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ\""
+				    "%s%s%s}";
 	const uint8_t r_maxlen = 128;
 	const uint16_t buf_len = 1000;
 	uint16_t remaining_len;
@@ -354,6 +366,12 @@ static void batch_upload_to_golioth(void)
 			return;
 		}
 
+		char tem_str[19], pre_str[19], hum_str[19];
+
+		get_sensor_string_or_empty(cached_data.tem, tem_str, sizeof(tem_str), "tem");
+		get_sensor_string_or_empty(cached_data.pre, pre_str, sizeof(pre_str), "pre");
+		get_sensor_string_or_empty(cached_data.hum, hum_str, sizeof(hum_str), "hum");
+
 		snprintk(buf + strlen(buf), buf_len - strlen(buf), r_fmt,
 			 minmea_tocoord(&cached_data.frame.latitude),
 			 minmea_tocoord(&cached_data.frame.longitude),
@@ -361,9 +379,7 @@ static void batch_upload_to_golioth(void)
 			 cached_data.frame.date.day, cached_data.frame.time.hours,
 			 cached_data.frame.time.minutes, cached_data.frame.time.seconds,
 			 cached_data.frame.time.microseconds,
-			 cached_data.tem.val1, abs(cached_data.tem.val2),
-			 cached_data.pre.val1, abs(cached_data.pre.val2),
-			 cached_data.hum.val1, abs(cached_data.hum.val2));
+			 tem_str, pre_str, hum_str);
 
 		msg_cnt = k_msgq_num_used_get(&coldchain_msgq);
 		remaining_len = sizeof(buf) - strlen(buf) - 1;
