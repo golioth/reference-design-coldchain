@@ -53,13 +53,19 @@ struct weather_data {
 	struct sensor_value hum;
 };
 
+#define ERROR_VAL1 999
+#define ERROR_VAL2 999999
 static const struct sensor_value reading_error = {
-	.val1 = 999,
-	.val2 = 999999
+	.val1 = ERROR_VAL1,
+	.val2 = ERROR_VAL2
 };
 
 /* Global to hold BME280 readings; updated at 1 Hz by thread */
-struct weather_data _latest_weather_data;
+struct weather_data _latest_weather_data = {
+	.tem.val1 = ERROR_VAL1, .tem.val2 = ERROR_VAL2,
+	.pre.val1 = ERROR_VAL1, .pre.val2 = ERROR_VAL2,
+	.hum.val1 = ERROR_VAL1, .hum.val2 = ERROR_VAL2,
+};
 
 /* Processed data waiting to be sent to Golioth */
 K_MSGQ_DEFINE(coldchain_msgq, sizeof(struct cold_chain_data), MAX_QUEUED_DATA, 4);
