@@ -53,6 +53,11 @@ struct weather_data {
 	struct sensor_value hum;
 };
 
+static const struct sensor_value reading_error = {
+	.val1 = 999,
+	.val2 = 999999
+};
+
 /* Global to hold BME280 readings; updated at 1 Hz by thread */
 struct weather_data _latest_weather_data;
 
@@ -205,6 +210,10 @@ extern void nmea_parser_thread(void *d0, void *d1, void *d2)
 
 		if (err) {
 			LOG_ERR("Cannot access weather data: %d", err);
+			/* Use an obvious error value so these are not used uninitialized */
+			cc_data.tem = reading_error;
+			cc_data.pre = reading_error;
+			cc_data.hum = reading_error;
 		} else {
 			cc_data.tem = _latest_weather_data.tem;
 			cc_data.pre = _latest_weather_data.pre;
