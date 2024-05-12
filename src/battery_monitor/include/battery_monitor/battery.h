@@ -8,6 +8,10 @@
 #ifndef APPLICATION_BATTERY_H_
 #define APPLICATION_BATTERY_H_
 
+#include <stdint.h>
+#include <stdbool.h>
+#include <golioth/client.h>
+
 /** Enable or disable measurement of the battery voltage.
  *
  * @param enable true to enable, false to disable
@@ -100,17 +104,20 @@ void log_battery_data(void);
 /**
  * @brief Stream battery data to Golioth.
  *
+ * @param client Golioth client to use for the Stream API call
  * @param battery_data battery data to stream to Golioth.
  *
  * @return Error number or zero if successful
  */
-int stream_battery_data(struct battery_data *batt_data);
+int stream_battery_data(struct golioth_client *client, struct battery_data *batt_data);
 
 /**
  * @brief Read, log, stream, and display a battery measurement.
  *
+ * @param client Golioth client to use for the Stream API call
+ *
  * @return Error number or zero if successful
  */
-int read_and_report_battery(void);
+int read_and_report_battery(struct golioth_client *client);
 
 #endif /* APPLICATION_BATTERY_H_ */
