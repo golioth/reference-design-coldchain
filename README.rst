@@ -1,9 +1,9 @@
 ..
-   Copyright (c) 2023 Golioth, Inc.
+   Copyright (c) 2022-2023 Golioth, Inc.
    SPDX-License-Identifier: Apache-2.0
 
-Golioth Cold Chain Tracker Reference
-####################################
+Golioth Cold Chain Tracker Reference Design
+###########################################
 
 Overview
 ********
@@ -58,12 +58,13 @@ successful build you will see a new ``build`` directory. Note that any changes
 cataloging all of the changes to the dependencies and the build (so no
 ``.gitignore`` is needed)
 
-During building, replace ``<your.semantic.version>`` to utilize the DFU
-functionality on this Reference Design.
+Prior to building, update ``CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION`` in the ``prj.conf`` file to
+reflect the firmware version number you want to assign to this build. Then run the following
+commands to build and program the firmware onto the device.
 
 .. code-block:: text
 
-   $ (.venv) west build -p -b aludel_mini_v1_sparkfun9160_ns app -- -DCONFIG_MCUBOOT_IMAGE_VERSION=\"<your.semantic.version>\"
+   $ (.venv) west build -p -b aludel_mini_v1_sparkfun9160_ns app
    $ (.venv) west flash
 
 Configure PSK-ID and PSK using the device shell based on your Golioth
@@ -94,14 +95,14 @@ Settings Service
 The following settings should be set in the Device Settings menu of the
 `Golioth Console`_.
 
-``LOOP_DELAY_S``
-   Adjusts the delay between sensor readings. Set to an integer value (seconds).
+``LOOP_DELAY_S`` Adjusts the delay between sending reading to Golioth. Each time this delay passes,
+   cached GPS/Temperature readings will be uploaded (along with battery info if applicable). Set to
+   an integer value (seconds).
 
    Default value is ``5`` seconds.
 
 ``GPS_DELAY_S``
-   Adjusts the delay between recording GPS readings. Set to an
-   integer value (seconds).
+   Adjusts the delay between caching GPS readings. Set to an integer value (seconds).
 
    Default value is ``3`` seconds.
 
@@ -144,12 +145,13 @@ This reference design may be build for the `Nordic nRF9160 DK`_, with the
 
 The click boards must be in this order for the GPS UART to work.
 
-Use the following commands to build and program. (Use the same console commands
-from above to provision this board after programming the firmware.)
+Prior to building, update ``CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION`` in the ``prj.conf`` file to
+reflect the firmware version number you want to assign to this build. Then run the following
+commands to build and program the firmware onto the device.
 
 .. code-block:: console
 
-   $ (.venv) west build -b nrf9160dk_nrf9160_ns app -- -DCONFIG_MCUBOOT_IMAGE_VERSION=\"<your.semantic.version>\"
+   $ (.venv) west build -b nrf9160dk_nrf9160_ns app
    $ (.venv) west flash
 
 External Libraries

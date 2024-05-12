@@ -1,19 +1,21 @@
 /*
- * Copyright (c) 2022 Golioth, Inc.
+ * Copyright (c) 2022-2023 Golioth, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(app_work, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(app_sensors, LOG_LEVEL_DBG);
 
-#include <net/golioth/system_client.h>
+#include <golioth/client.h>
+#include <golioth/stream.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/kernel.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/uart.h>
 
-#include "app_work.h"
+#include "app_sensors.h"
 #include "app_settings.h"
 #include "lib/minmea/minmea.h"
 #include <stdio.h>
@@ -36,6 +38,7 @@ static const struct gpio_dt_spec gnss7_sel = GPIO_DT_SPEC_GET(UART_SEL, gpios);
 
 /* Max number of parsed readings to queue between uploads (96 bytes each) */
 #define MAX_QUEUED_DATA 500
+#define GPS_BATCH_STREAM_TIMEOUT_S 2
 
 /* GPS stream endpoint on Golioth */
 #define GPS_ENDP "gps"
@@ -393,9 +396,13 @@ static void batch_upload_to_golioth(void)
 
 		if (msg_cnt == 0 || remaining_len < r_maxlen) {
 			snprintk(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s", "]");
-			int err = golioth_stream_push(client, GPS_ENDP,
-						      GOLIOTH_CONTENT_FORMAT_APP_JSON,
-						      buf, strlen(buf));
+
+			int err = golioth_stream_set_sync(client,
+							  GPS_ENDP,
+							  GOLIOTH_CONTENT_TYPE_JSON,
+							  buf,
+							  strlen(buf),
+							  GPS_BATCH_STREAM_TIMEOUT_S);
 
 			if (err) {
 				LOG_ERR("Failed to send sensor data to Golioth: %d", err);
@@ -415,25 +422,29 @@ static void batch_upload_to_golioth(void)
 
 /* This will be called by the main() loop */
 /* Do all of your work here! */
-void app_work_sensor_read(void)
+void app_sensors_read_and_stream(void)
 {
 	IF_ENABLED(CONFIG_ALUDEL_BATTERY_MONITOR, (
-		read_and_report_battery();
+		read_and_report_battery(client);
 		IF_ENABLED(CONFIG_LIB_OSTENTUS, (
 			slide_set(BATTERY_V, get_batt_v_str(), strlen(get_batt_v_str()));
 			slide_set(BATTERY_LVL, get_batt_lvl_str(), strlen(get_batt_lvl_str()));
 		));
 	));
 
-	if (golioth_is_connected(client)) {
+	if (golioth_client_is_connected(client)) {
 		batch_upload_to_golioth();
 	}
 }
 
-void app_work_init(struct golioth_client *work_client)
+void app_sensors_set_client(struct golioth_client *sensors_client)
+{
+	client = sensors_client;
+}
+
+void app_sensors_init(void)
 {
 	LOG_INF("Initializing UART");
-	client = work_client;
 
 	int err = gpio_pin_configure_dt(&gnss7_sel, GPIO_OUTPUT_ACTIVE);
 
