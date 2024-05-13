@@ -19,6 +19,45 @@ Golioth as a historical record using the GPS timestamp. The reference design
 caches data, so that when the device is out of cellular range, it can still
 record for later upload.
 
+Supported Hardware
+******************
+
+This firmware can be built for a variety of supported hardware platforms.
+
+.. pull-quote::
+   [!IMPORTANT]
+
+   In Zephyr, each of these different hardware variants is given a unique
+   "board" identifier, which is used by the build system to generate firmware
+   for that variant.
+
+   When building firmware using the instructions below, make sure to use the
+   correct Zephyr board identifier that corresponds to your follow-along
+   hardware platform.
+
+.. list-table:: **Follow-Along Hardware**
+   :header-rows: 1
+
+   * - Hardware
+     - Zephyr Board
+     - Follow-Along Guide
+
+   * - .. image:: images/golioth-coldchain_tracker-fah-nrf9160dk.jpg
+          :width: 240
+     - ``nrf9160dk_nrf9160_ns``
+     - `nRF9160 DK Follow-Along Guide`_
+
+.. list-table:: **Custom Golioth Hardware**
+   :header-rows: 1
+
+   * - Hardware
+     - Zephyr Board
+     - Project Page
+   * - .. image:: images/golioth-coldchain_tracker-aludel_mini_v1_photo_top.jpg
+          :width: 240
+     - ``aludel_mini_v1_sparkfun9160_ns``
+     - `Cold Chain Asset Tracker Project Page`_
+
 Local set up
 ************
 
@@ -199,6 +238,8 @@ the following workflow to pull in future changes:
    git add resolved_files
    git commit
 
+.. _nRF9160 DK Follow-Along Guide: https://projects.golioth.io/reference-designs/cold-chain-tracker/guide-nrf9160-dk
+.. _Cold Chain Asset Tracker Project Page: https://projects.golioth.io/reference-designs/cold-chain-tracker
 .. _Golioth Console: https://console.golioth.io
 .. _Nordic nRF9160 DK: https://www.nordicsemi.com/Products/Development-hardware/nrf9160-dk
 .. _MikroE Arduino UNO click shield: https://www.mikroe.com/arduino-uno-click-shield
