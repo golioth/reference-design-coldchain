@@ -131,15 +131,15 @@ Golioth uses `Pipelines`_ to route stream data. This gives you flexibility to ch
 routing without requiring updated device firmware.
 
 Whenever sending stream data, you must enable a pipeline in your Golioth project to configure how
-that data is handled. Add the contents of ``pipelines/cbor-to-lightdb.yml`` as a new pipeline as
-follows (note that this is the default pipeline for new projects and may already be present):
+that data is handled. Add the contents of ``pipelines/batch-json-to-lightdb-stream.yml`` as a new
+pipeline as follows:
 
    1. Navigate to your project on the Golioth web console.
    2. Select ``Pipelines`` from the left sidebar and click the ``Create`` button.
    3. Give your new pipeline a name and paste the pipeline configuration into the editor.
    4. Click the toggle in the bottom right to enable the pipeline and then click ``Create``.
 
-All data streamed to Golioth in CBOR format will now be routed to LightDB Stream and may be viewed
+All data streamed to Golioth in JSON format will now be routed to LightDB Stream and may be viewed
 using the web console. You may change this behavior at any time without updating firmware simply by
 editing this pipeline entry.
 
