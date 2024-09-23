@@ -35,6 +35,8 @@ static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 #define UART_SEL DT_ALIAS(gnss7_sel)
 static const struct gpio_dt_spec gnss7_sel = GPIO_DT_SPEC_GET(UART_SEL, gpios);
 
+#define MAX_BATCH_STREAM_SIZE 1000
+#define MIN_REMAINING_FOR_BATCH_UPLOAD 128
 #define NMEA_SIZE 128
 
 /* Max number of parsed readings to queue between uploads (96 bytes each) */
@@ -359,21 +361,25 @@ static void batch_upload_to_golioth(void)
 	static const char r_fmt[] = "{\"lat\":%f,\"lon\":%f,\""
 				    "time\":\"20%02d-%02d-%02dT%02d:%02d:%02d.%03dZ\""
 				    "%s%s%s}";
-	const uint8_t r_maxlen = 128;
-	const uint16_t buf_len = 1000;
 	uint16_t remaining_len;
 	uint16_t tot_pushed = 0;
-	char buf[buf_len];
 	struct cold_chain_data cached_data;
 
-	snprintk(buf, sizeof(buf), "%s", "[");
+	char *buf = (char *) malloc(sizeof(char) * MAX_BATCH_STREAM_SIZE);
+
+	if (!buf) {
+		LOG_ERR("Enable to allocate memory for batch upload");
+		return;
+	}
+
+	snprintk(buf, MAX_BATCH_STREAM_SIZE, "%s", "[");
 
 	while (msg_cnt > 0) {
 		int err = k_msgq_get(&coldchain_msgq, &cached_data, K_MSEC(10));
 
 		if (err) {
 			LOG_ERR("Error fetching cached reading: %d", err);
-			return;
+			goto free_after_stream;
 		}
 
 		char tem_str[19], pre_str[19], hum_str[19];
@@ -382,7 +388,7 @@ static void batch_upload_to_golioth(void)
 		get_sensor_string_or_empty(cached_data.pre, pre_str, sizeof(pre_str), "pre");
 		get_sensor_string_or_empty(cached_data.hum, hum_str, sizeof(hum_str), "hum");
 
-		snprintk(buf + strlen(buf), buf_len - strlen(buf), r_fmt,
+		snprintk(buf + strlen(buf), MAX_BATCH_STREAM_SIZE - strlen(buf), r_fmt,
 			 minmea_tocoord(&cached_data.frame.latitude),
 			 minmea_tocoord(&cached_data.frame.longitude),
 			 cached_data.frame.date.year, cached_data.frame.date.month,
@@ -392,11 +398,11 @@ static void batch_upload_to_golioth(void)
 			 tem_str, pre_str, hum_str);
 
 		msg_cnt = k_msgq_num_used_get(&coldchain_msgq);
-		remaining_len = sizeof(buf) - strlen(buf) - 1;
+		remaining_len = MAX_BATCH_STREAM_SIZE - strlen(buf) - 1;
 		tot_pushed++;
 
-		if (msg_cnt == 0 || remaining_len < r_maxlen) {
-			snprintk(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s", "]");
+		if (msg_cnt == 0 || remaining_len < MIN_REMAINING_FOR_BATCH_UPLOAD) {
+			snprintk(buf + strlen(buf), MAX_BATCH_STREAM_SIZE - strlen(buf), "%s", "]");
 
 			int err = golioth_stream_set_sync(client,
 							  GPS_ENDP,
@@ -407,18 +413,22 @@ static void batch_upload_to_golioth(void)
 
 			if (err) {
 				LOG_ERR("Failed to send sensor data to Golioth: %d", err);
-				return;
+				goto free_after_stream;
 			}
 
 			if (msg_cnt) {
-				snprintk(buf, sizeof(buf), "%s", "[");
+				snprintk(buf, MAX_BATCH_STREAM_SIZE, "%s", "[");
 			}
 		} else {
-			snprintk(buf + strlen(buf), buf_len - strlen(buf), "%s", ",");
+			snprintk(buf + strlen(buf), MAX_BATCH_STREAM_SIZE - strlen(buf), "%s", ",");
 		}
 	}
 
 	LOG_INF("Pushed %d cached readings up to Golioth.", tot_pushed);
+
+free_after_stream:
+	free(buf);
+
 }
 
 /* This will be called by the main() loop */
