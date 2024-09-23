@@ -155,8 +155,8 @@ static void update_ostentus_gps(float lat, float lon, char *tem_str, char tem_le
 	char lat_str[12];
 	char lon_str[12];
 
-	snprintk(lat_str, sizeof(lat_str), "%f", lat);
-	snprintk(lon_str, sizeof(lon_str), "%f", lon);
+	snprintk(lat_str, sizeof(lat_str), "%f", (double) lat);
+	snprintk(lon_str, sizeof(lon_str), "%f", (double) lon);
 
 	ostentus_slide_set(o_dev, SLIDE_LAT, lat_str, strlen(lat_str));
 	ostentus_slide_set(o_dev, SLIDE_LON, lon_str, strlen(lon_str));
@@ -389,8 +389,8 @@ static void batch_upload_to_golioth(void)
 		get_sensor_string_or_empty(cached_data.hum, hum_str, sizeof(hum_str), "hum");
 
 		snprintk(buf + strlen(buf), MAX_BATCH_STREAM_SIZE - strlen(buf), r_fmt,
-			 minmea_tocoord(&cached_data.frame.latitude),
-			 minmea_tocoord(&cached_data.frame.longitude),
+			 (double) minmea_tocoord(&cached_data.frame.latitude),
+			 (double) minmea_tocoord(&cached_data.frame.longitude),
 			 cached_data.frame.date.year, cached_data.frame.date.month,
 			 cached_data.frame.date.day, cached_data.frame.time.hours,
 			 cached_data.frame.time.minutes, cached_data.frame.time.seconds,
