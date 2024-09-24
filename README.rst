@@ -1,5 +1,5 @@
 ..
-   Copyright (c) 2022-2023 Golioth, Inc.
+   Copyright (c) 2022-2024 Golioth, Inc.
    SPDX-License-Identifier: Apache-2.0
 
 Golioth Cold Chain Tracker Reference Design
@@ -61,8 +61,11 @@ This firmware can be built for a variety of supported hardware platforms.
 Local set up
 ************
 
-Do not clone this repo using git. Zephyr's ``west`` meta tool should be used to
-set up your local workspace.
+.. pull-quote::
+   [!IMPORTANT]
+
+   Do not clone this repo using git. Zephyr's ``west`` meta tool should be used to
+   set up your local workspace.
 
 Install the Python virtual environment (recommended)
 ====================================================
@@ -89,21 +92,27 @@ Use ``west`` to initialize and install
 Building the application
 ************************
 
-Build Zephyr sample application for Golioth Aludel-Mini
-(``aludel_mini_v1_sparkfun9160_ns``) from the top level of your project. After a
+Build the Zephyr sample application for the `Nordic nRF9160 DK`_
+(``nrf9160dk_nrf9160_ns``) from the top level of your project. After a
 successful build you will see a new ``build`` directory. Note that any changes
 (and git commits) to the project itself will be inside the ``app`` folder. The
 ``build`` and ``deps`` directories being one level higher prevents the repo from
 cataloging all of the changes to the dependencies and the build (so no
-``.gitignore`` is needed)
+``.gitignore`` is needed).
 
-Prior to building, update ``CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION`` in the ``prj.conf`` file to
-reflect the firmware version number you want to assign to this build. Then run the following
-commands to build and program the firmware onto the device.
+Prior to building, update ``VERSION`` file to reflect the firmware version number you want to assign
+to this build. Then run the following commands to build and program the firmware onto the device.
+
+
+.. pull-quote::
+   [!IMPORTANT]
+
+   You must perform a pristine build (use ``-p`` or remove the ``build`` directory)
+   after changing the firmware version number in the ``VERSION`` file for the change to take effect.
 
 .. code-block:: text
 
-   $ (.venv) west build -p -b aludel_mini_v1_sparkfun9160_ns app
+   $ (.venv) west build -p -b nrf9160dk/nrf9160/ns --sysbuild app
    $ (.venv) west flash
 
 Configure PSK-ID and PSK using the device shell based on your Golioth
@@ -114,6 +123,25 @@ credentials and reboot:
    uart:~$ settings set golioth/psk-id <my-psk-id@my-project>
    uart:~$ settings set golioth/psk <my-psk>
    uart:~$ kernel reboot cold
+
+Add Pipeline to Golioth
+***********************
+
+Golioth uses `Pipelines`_ to route stream data. This gives you flexibility to change your data
+routing without requiring updated device firmware.
+
+Whenever sending stream data, you must enable a pipeline in your Golioth project to configure how
+that data is handled. Add the contents of ``pipelines/cbor-to-lightdb.yml`` as a new pipeline as
+follows (note that this is the default pipeline for new projects and may already be present):
+
+   1. Navigate to your project on the Golioth web console.
+   2. Select ``Pipelines`` from the left sidebar and click the ``Create`` button.
+   3. Give your new pipeline a name and paste the pipeline configuration into the editor.
+   4. Click the toggle in the bottom right to enable the pipeline and then click ``Create``.
+
+All data streamed to Golioth in CBOR format will now be routed to LightDB Stream and may be viewed
+using the web console. You may change this behavior at any time without updating firmware simply by
+editing this pipeline entry.
 
 Golioth Features
 ****************
@@ -173,8 +201,7 @@ The following RPCs can be initiated in the Remote Procedure Call menu of the
 Hardware Variations
 *******************
 
-Nordic nRF9160 DK
-=================
+This reference design may be built for a variety of different boards.
 
 This reference design may be build for the `Nordic nRF9160 DK`_, with the
 `MikroE Arduino UNO click shield`_ to interface the two click boards.
@@ -184,14 +211,44 @@ This reference design may be build for the `Nordic nRF9160 DK`_, with the
 
 The click boards must be in this order for the GPS UART to work.
 
-Prior to building, update ``CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION`` in the ``prj.conf`` file to
-reflect the firmware version number you want to assign to this build. Then run the following
-commands to build and program the firmware onto the device.
+Prior to building, update ``VERSION`` file to reflect the firmware version number you want to assign
+to this build. Then run the following commands to build and program the firmware onto the device.
 
 .. code-block:: console
 
-   $ (.venv) west build -b nrf9160dk_nrf9160_ns app
+   $ (.venv) west build -p -b aludel_mini/nrf9160/ns --sysbuild app
    $ (.venv) west flash
+
+Golioth Aludel Elixir
+=====================
+
+This reference design may be built for the Golioth Aludel Elixir board. By default this will build
+for the latest hardware revision of this board.
+
+.. code-block:: text
+
+   $ (.venv) west build -p -b aludel_elixir/nrf9160/ns --sysbuild app
+   $ (.venv) west flash
+
+To build for a specific board revision (e.g. Rev A) add the revision suffix ``@<rev>``.
+
+.. code-block:: text
+
+   $ (.venv) west build -p -b aludel_elixir@A/nrf9160/ns --sysbuild app
+   $ (.venv) west flash
+
+OTA Firmware Update
+*******************
+
+This application includes the ability to perform Over-the-Air (OTA) firmware updates:
+
+1. Update the version number in the `VERSION` file and perform a pristine (important) build to
+   incorporate the version change.
+2. Upload the `build/app/zephyr/zephyr.signed.bin` file as an artifact for your Golioth project
+   using `main` as the package name.
+3. Create and roll out a release based on this artifact.
+
+Visit `the Golioth Docs OTA Firmware Upgrade page`_ for more info.
 
 External Libraries
 ******************
@@ -242,6 +299,8 @@ the following workflow to pull in future changes:
 .. _Cold Chain Asset Tracker Project Page: https://projects.golioth.io/reference-designs/cold-chain-tracker
 .. _Golioth Console: https://console.golioth.io
 .. _Nordic nRF9160 DK: https://www.nordicsemi.com/Products/Development-hardware/nrf9160-dk
+.. _Pipelines: https://docs.golioth.io/data-routing
+.. _the Golioth Docs OTA Firmware Upgrade page: https://docs.golioth.io/firmware/golioth-firmware-sdk/firmware-upgrade/firmware-upgrade
 .. _MikroE Arduino UNO click shield: https://www.mikroe.com/arduino-uno-click-shield
 .. _golioth-zephyr-boards: https://github.com/golioth/golioth-zephyr-boards
 .. _libostentus: https://github.com/golioth/libostentus

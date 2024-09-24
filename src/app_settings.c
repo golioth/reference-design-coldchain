@@ -61,10 +61,9 @@ static enum golioth_settings_status on_gps_delay_setting(int32_t new_value, void
 
 void app_settings_register(struct golioth_client *client)
 {
-	int err;
 	struct golioth_settings *settings = golioth_settings_init(client);
 
-	err = golioth_settings_register_int_with_range(settings,
+	int err = golioth_settings_register_int_with_range(settings,
 							   "LOOP_DELAY_S",
 							   LOOP_DELAY_S_MIN,
 							   LOOP_DELAY_S_MAX,
