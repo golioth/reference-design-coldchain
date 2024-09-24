@@ -60,14 +60,14 @@ jobs:
 
       - name: Build with West
         run: |
-          west build -p -b ${{ inputs.BOARD }} app
+          west build -p -b ${{ inputs.BOARD }} --sysbuild app
 
       - name: Prepare artifacts
         shell: bash
         if: inputs.ARTIFACT == true && inputs.TAG != ''
 
         run: |
-          cd build/zephyr
+          cd build
           mkdir -p artifacts
           BOARD_NICENAME=${{ inputs.BOARD }}
           BOARD_NICENAME=${BOARD_NICENAME//\//_}
