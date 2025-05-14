@@ -26,7 +26,7 @@ LOG_MODULE_REGISTER(app_sensors, LOG_LEVEL_DBG);
 static const struct device *o_dev = DEVICE_DT_GET_ANY(golioth_ostentus);
 #endif
 #ifdef CONFIG_ALUDEL_BATTERY_MONITOR
-#include "battery_monitor/battery.h"
+#include <battery_monitor.h>
 #endif
 
 #define UART_DEVICE_NODE DT_ALIAS(click_uart)
