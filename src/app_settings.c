@@ -15,7 +15,7 @@ LOG_MODULE_REGISTER(app_settings, LOG_LEVEL_DBG);
 /* How long to wait between uploading to Golioth */
 static int32_t _loop_delay_s = 5;
 #define LOOP_DELAY_S_MAX 43200
-#define LOOP_DELAY_S_MIN 0
+#define LOOP_DELAY_S_MIN 1
 
 /* How long to wait between GPS readings */
 static int32_t _gps_delay_s = 3;

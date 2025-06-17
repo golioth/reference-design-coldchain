@@ -238,7 +238,7 @@ folder. The `build` and `deps` directories being one level higher
 prevents the repo from cataloging all of the changes to the dependencies
 and the build (so no `.gitignore` is needed).
 
-This reference design may be build for the [Nordic nRF9160
+This reference design may be built for the [Nordic nRF9160
 DK](https://www.nordicsemi.com/Products/Development-hardware/nrf9160-dk),
 with the [MikroE Arduino UNO click
 shield](https://www.mikroe.com/arduino-uno-click-shield) to interface
@@ -280,7 +280,7 @@ these repositories from `west.yml` and remove the includes/function
 calls from the C code.
 
   - [golioth-zephyr-boards](https://github.com/golioth/golioth-zephyr-boards)
-    includes the board definitions for the Golioth Aludel-Mini
+    includes the board definitions for the Golioth Aludel-Elixir
   - [libostentus](https://github.com/golioth/libostentus) is a helper
     library for controlling the Ostentus ePaper faceplate
   - [zephyr-network-info](https://github.com/golioth/zephyr-network-info)
