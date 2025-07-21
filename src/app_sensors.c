@@ -14,6 +14,7 @@ LOG_MODULE_REGISTER(app_sensors, LOG_LEVEL_DBG);
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/zbus/zbus.h>
 
 #include "app_sensors.h"
 #include "app_settings.h"
@@ -46,32 +47,26 @@ static const struct gpio_dt_spec gnss7_sel = GPIO_DT_SPEC_GET(UART_SEL, gpios);
 /* GPS stream endpoint on Golioth */
 #define GPS_ENDP "gps"
 
-struct cold_chain_data {
-	struct sensor_value tem;
-	struct sensor_value pre;
-	struct sensor_value hum;
-	struct minmea_sentence_rmc frame;
-};
-
 struct weather_data {
 	struct sensor_value tem;
 	struct sensor_value pre;
 	struct sensor_value hum;
 };
 
-#define ERROR_VAL1 999
-#define ERROR_VAL2 999999
-static const struct sensor_value reading_error = {
-	.val1 = ERROR_VAL1,
-	.val2 = ERROR_VAL2
+struct cold_chain_data {
+	struct weather_data weather;
+	struct minmea_sentence_rmc frame;
 };
 
-/* Global to hold BME280 readings; updated at 1 Hz by thread */
-struct weather_data _latest_weather_data = {
-	.tem.val1 = ERROR_VAL1, .tem.val2 = ERROR_VAL2,
-	.pre.val1 = ERROR_VAL1, .pre.val2 = ERROR_VAL2,
-	.hum.val1 = ERROR_VAL1, .hum.val2 = ERROR_VAL2,
-};
+#define ERROR_VAL1 999
+#define ERROR_VAL2 999999
+
+ZBUS_CHAN_DEFINE(weather_chan, struct weather_data, NULL, NULL, ZBUS_OBS_DECLARE(),
+		 ZBUS_MSG_INIT(.tem.val1 = ERROR_VAL1, .tem.val2 = ERROR_VAL2,
+			       .pre.val1 = ERROR_VAL1, .pre.val2 = ERROR_VAL2,
+			       .hum.val1 = ERROR_VAL1, .hum.val2 = ERROR_VAL2));
+
+static const struct sensor_value reading_error = {.val1 = ERROR_VAL1, .val2 = ERROR_VAL2};
 
 /* Processed data waiting to be sent to Golioth */
 K_MSGQ_DEFINE(coldchain_msgq, sizeof(struct cold_chain_data), MAX_QUEUED_DATA, 4);
@@ -83,26 +78,44 @@ static struct golioth_client *client;
 /* Add Sensor structs here */
 const struct device *weather_dev;
 
-/* Thread reads weather sensor and provides easy access to latest data */
-K_MUTEX_DEFINE(weather_mutex);		    /* Protect data */
+/* Thread reads weather sensor and publishes latest data on zbus */
 K_SEM_DEFINE(bme280_initialized_sem, 0, 1); /* Wait until sensor is ready */
 
 void weather_sensor_data_fetch(void)
 {
-	if (!weather_dev) {
-		_latest_weather_data.tem = reading_error;
-		_latest_weather_data.pre = reading_error;
-		_latest_weather_data.hum = reading_error;
+	int err;
+
+	err = sensor_sample_fetch(weather_dev);
+	if (err != 0) {
+		LOG_ERR("Failed to fetch sensor data: %d", err);
 		return;
 	}
-	sensor_sample_fetch(weather_dev);
-	k_mutex_lock(&weather_mutex, K_FOREVER);
 
-	sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP, &_latest_weather_data.tem);
-	sensor_channel_get(weather_dev, SENSOR_CHAN_PRESS, &_latest_weather_data.pre);
-	sensor_channel_get(weather_dev, SENSOR_CHAN_HUMIDITY, &_latest_weather_data.hum);
+	struct weather_data reading;
 
-	k_mutex_unlock(&weather_mutex);
+	err = sensor_channel_get(weather_dev, SENSOR_CHAN_AMBIENT_TEMP, &reading.tem);
+	if (err != 0) {
+		LOG_ERR("Failed to get sensor channel %u: %d", SENSOR_CHAN_AMBIENT_TEMP, err);
+		return;
+	}
+
+	err = sensor_channel_get(weather_dev, SENSOR_CHAN_PRESS, &reading.pre);
+	if (err != 0) {
+		LOG_ERR("Failed to get sensor channel %u: %d", SENSOR_CHAN_PRESS, err);
+		return;
+	}
+
+	err = sensor_channel_get(weather_dev, SENSOR_CHAN_HUMIDITY, &reading.hum);
+	if (err != 0) {
+		LOG_ERR("Failed to get sensor channel %u: %d", SENSOR_CHAN_HUMIDITY, err);
+		return;
+	}
+
+	err = zbus_chan_pub(&weather_chan, &reading, K_MSEC(100));
+	if (err != 0) {
+		LOG_ERR("Failed to publish sensor data: %d", err);
+		return;
+	}
 }
 
 #define WEATHER_STACK 1024
@@ -221,19 +234,13 @@ extern void nmea_parser_thread(void *d0, void *d1, void *d2)
 			continue;
 		}
 
-		err = k_mutex_lock(&weather_mutex, K_MSEC(50));
-
+		err = zbus_chan_read(&weather_chan, &cc_data.weather, K_MSEC(50));
 		if (err) {
 			LOG_ERR("Cannot access weather data: %d", err);
 			/* Use an obvious error value so these are not used uninitialized */
-			cc_data.tem = reading_error;
-			cc_data.pre = reading_error;
-			cc_data.hum = reading_error;
-		} else {
-			cc_data.tem = _latest_weather_data.tem;
-			cc_data.pre = _latest_weather_data.pre;
-			cc_data.hum = _latest_weather_data.hum;
-			k_mutex_unlock(&weather_mutex);
+			cc_data.weather.tem = reading_error;
+			cc_data.weather.pre = reading_error;
+			cc_data.weather.hum = reading_error;
 		}
 
 		err = k_msgq_put(&coldchain_msgq, &cc_data, K_MSEC(1));
@@ -243,9 +250,8 @@ extern void nmea_parser_thread(void *d0, void *d1, void *d2)
 		} else {
 			char tem_str[12];
 
-			snprintk(tem_str, sizeof(tem_str), "%d.%02dc",
-				 cc_data.tem.val1,
-				 cc_data.tem.val2 / 10000);
+			snprintk(tem_str, sizeof(tem_str), "%d.%02dc", cc_data.weather.tem.val1,
+				 cc_data.weather.tem.val2 / 10000);
 
 			LOG_DBG("nmea: %s t: %s", raw_readings, tem_str);
 
@@ -384,9 +390,12 @@ static void batch_upload_to_golioth(void)
 
 		char tem_str[19], pre_str[19], hum_str[19];
 
-		get_sensor_string_or_empty(cached_data.tem, tem_str, sizeof(tem_str), "tem");
-		get_sensor_string_or_empty(cached_data.pre, pre_str, sizeof(pre_str), "pre");
-		get_sensor_string_or_empty(cached_data.hum, hum_str, sizeof(hum_str), "hum");
+		get_sensor_string_or_empty(cached_data.weather.tem, tem_str, sizeof(tem_str),
+					   "tem");
+		get_sensor_string_or_empty(cached_data.weather.pre, pre_str, sizeof(pre_str),
+					   "pre");
+		get_sensor_string_or_empty(cached_data.weather.hum, hum_str, sizeof(hum_str),
+					   "hum");
 
 		snprintk(buf + strlen(buf), MAX_BATCH_STREAM_SIZE - strlen(buf), r_fmt,
 			 (double) minmea_tocoord(&cached_data.frame.latitude),
