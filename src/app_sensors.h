@@ -30,7 +30,7 @@ typedef enum {
 	SLIDE_TEM,
 #ifdef CONFIG_ALUDEL_BATTERY_MONITOR
 	BATTERY_V,
-	BATTERY_LVL,
+	BATTERY_PCT,
 #endif
 	FIRMWARE
 } slide_key;
